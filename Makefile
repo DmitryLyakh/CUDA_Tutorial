@@ -7,8 +7,8 @@ CXX_INC =
 CXX_LIB = -lstdc++
 
 CUDA_COMP = nvcc
-CUDA_FLAGS = --compile -ccbin /usr/bin/g++ -std=c++11 -arch=sm_50 -O3 -lineinfo -w --resource-usage --ptxas-options=-v -Xcompiler -fPIC -D_FORCE_INLINES
-#CUDA_FLAGS = --compile -ccbin /usr/bin/g++ -std=c++11 -arch=sm_50 -O0 -g -G -lineinfo -w --resource-usage --ptxas-options=-v -Xcompiler -fPIC -D_FORCE_INLINES
+CUDA_FLAGS = --compile -ccbin /usr/bin/g++ -std=c++11 -arch=sm_35 -O3 -lineinfo -w --resource-usage --ptxas-options=-v -Xcompiler -fPIC -D_FORCE_INLINES
+#CUDA_FLAGS = --compile -ccbin /usr/bin/g++ -std=c++11 -arch=sm_35 -O0 -g -G -lineinfo -w --resource-usage --ptxas-options=-v -Xcompiler -fPIC -D_FORCE_INLINES
 CUDA_INC = -I/usr/local/cuda/include
 CUDA_LIB= -L/usr/local/cuda/lib64 -lcudart -lcublas
 
