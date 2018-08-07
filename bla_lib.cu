@@ -50,6 +50,10 @@ __global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T 
 static const int TILE_EXT_X = 16;
 static const int TILE_EXT_Y = 16;
 
+//Internal tests:
+void test_hello();
+void test_norm();
+
 
 //DEFINITIONS:
 void init()
@@ -148,6 +152,35 @@ void test_hello()
  bla::deallocate(0,(void*)ds1,bla::MemKind::Regular);
  bla::deallocate(-1,(void*)hs1,bla::MemKind::Pinned);
 
+ return;
+}
+
+
+void test_norm()
+{
+ std::cout << "Testing norm2 on GPU 0 ..." << std::endl;
+ size_t vol = 1000000;
+ float * arr0 = static_cast<float*>(allocate(-1,vol,MemKind::Pinned));
+ float * arr1 = static_cast<float*>(allocate(0,vol,MemKind::Regular));
+ float * dnorm2 = static_cast<float*>(allocate(0,1,MemKind::Regular));
+
+ cudaError_t cuerr = cudaMemcpy((void*)arr1,(void*)arr0,vol*sizeof(float),cudaMemcpyDefault);
+
+ float norm2 = 0.0f;
+
+
+ deallocate(0,(void*)dnorm2,MemKind::Regular);
+ deallocate(0,(void*)arr1,MemKind::Regular);
+ deallocate(-1,(void*)arr0,MemKind::Pinned);
+ std::cout << "Norm2 = " << norm2 << std::endl;
+ return;
+}
+
+
+void test_bla()
+{
+ test_hello();
+ test_norm();
  return;
 }
 

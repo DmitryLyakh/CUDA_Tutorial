@@ -36,8 +36,8 @@ void init();
 //Shutdown:
 void shutdown();
 
-//Test hello:
-void test_hello();
+//Tests:
+void test_bla();
 
 } //namespace bla
 

@@ -25,8 +25,9 @@
 
 #include "bla_lib.hpp"
 
-void test_bla()
+void use_bla()
 {
+ std::cout << "Let's try to use BLA library ..." << std::endl;
  //Create matrix A:
  bla::Matrix<float> A(1000,2000);
  //Allocate matrix A body on Host:
@@ -48,6 +49,7 @@ void test_bla()
  //Set matrix C body to zero:
  C.zeroBody(0);
 
+ std::cout << "Seems like it works!" << std::endl;
  return;
 }
 
@@ -58,11 +60,11 @@ int main(int argc, char ** argv)
 //Init the BLA library:
  bla::init();
 
-//Test hello:
- bla::test_hello();
+//Test the BLA library:
+ bla::test_bla();
 
-//Test BLA:
- //test_bla();
+//Use the BLA library:
+ use_bla();
 
 //Shutdown the BLA library:
  bla::shutdown();
