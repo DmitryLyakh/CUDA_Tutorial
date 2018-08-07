@@ -83,8 +83,12 @@ void init()
      for(int j = gpuAmount-1; j >= 0; --j){
       if(j != i){
        if(gpuProperty[j].unifiedAddressing != 0){
-        cuerr = cudaDeviceEnablePeerAccess(j,0); assert(cuerr == cudaSuccess);
-        std::cout << "GPU " << i << " can access peer GPU " << j << std::endl;
+        cuerr = cudaDeviceEnablePeerAccess(j,0);
+        if(cuerr == cudaSuccess){
+         std::cout << "GPU " << i << " can access peer GPU " << j << std::endl;
+        }else{
+         std::cout << "GPU " << i << " cannot access peer GPU " << j << std::endl;
+        }
        }
       }
      }
@@ -247,7 +251,7 @@ __global__ void gpu_array_add(size_t arr_size, T * __restrict__ arr0, const T * 
 template <typename T>
 __global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
 {
- T __shared__ lbuf[TILE_EXT_X][TILE_EXT_Y],rbuf[TILE_EXT_X][TILE_EXT_Y];
+ __shared__ T lbuf[TILE_EXT_X][TILE_EXT_Y],rbuf[TILE_EXT_X][TILE_EXT_Y];
 
  return;
 }
