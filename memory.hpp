@@ -27,6 +27,7 @@ namespace bla{
 enum class MemKind{
  Regular, //regular memory
  Pinned,  //pinned memory (only matters for Host)
+ Mapped,  //mapped pinned memory (only matters for Host)
  Unified  //unified memory
 };
 

@@ -26,6 +26,7 @@
 #include <cublas_v2.h>
 
 #include "timer.hpp"
+#include "memory.hpp"
 #include "matrix.hpp"
 
 namespace bla{

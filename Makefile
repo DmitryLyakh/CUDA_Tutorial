@@ -26,7 +26,7 @@ memory.o: memory.cpp memory.hpp
 bla_lib.o: bla_lib.cu bla_lib.hpp matrix.hpp memory.hpp timer.hpp
 	$(CUDA_COMP) $(CUDA_FLAGS) $(CXX_INC) $(CUDA_INC) bla_lib.cu
 
-main.o: main.cpp bla_lib.cu bla_lib.hpp
+main.o: main.cpp bla_lib.cu bla_lib.hpp memory.hpp
 	$(CXX_COMP) $(CXX_FLAGS) $(CXX_INC) $(CUDA_INC) main.cpp
 
 

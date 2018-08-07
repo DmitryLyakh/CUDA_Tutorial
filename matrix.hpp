@@ -22,6 +22,7 @@
 #define _MATRIX_HPP
 
 #include <assert.h>
+#include <string.h>
 #include <vector>
 
 //#include <cuda.h>
@@ -43,10 +44,13 @@ public:
  Matrix & operator=(const Matrix &) = delete;
  Matrix(Matrix && matrix) = default;
  Matrix & operator=(Matrix && matrix) = default;
- ~Matrix();
+ virtual ~Matrix();
 
- T * getBodyPtr(int device) const;
- void initBody(int device, MemKind memkind);
+ size_t getSize() const;
+ T * getBodyPtr(int device) const; //returns a pointer to the memory resource on requested device (if any)
+ void allocateBody(int device, MemKind memkind); //allocates memory resource of requested kind on requested device
+ void zeroBody(int device); //initializes matrix body to zero on any device
+ void setBodyHost(); //initializes matrix body to some value on Host
 
 private:
 
@@ -54,14 +58,12 @@ private:
   int device;
   void * ptr;
   MemKind memkind;
- } Place;
-
- void setBody();
+ } Resource;
 
  int nrows_;
  int ncols_;
  size_t elem_size_;
- std::vector<Place> location_;
+ std::vector<Resource> location_;
 };
 
 
@@ -86,6 +88,13 @@ Matrix<T>::~Matrix()
 
 
 template <typename T>
+size_t Matrix<T>::getSize() const
+{
+ return (static_cast<size_t>(nrows_)*static_cast<size_t>(ncols_)*elem_size_); //matrix size in bytes
+}
+
+
+template <typename T>
 T * Matrix<T>::getBodyPtr(int device) const
 {
  T * ptr = nullptr;
@@ -97,25 +106,45 @@ T * Matrix<T>::getBodyPtr(int device) const
 
 
 template <typename T>
-void Matrix<T>::initBody(int device, MemKind memkind)
+void Matrix<T>::allocateBody(int device, MemKind memkind)
 {
- size_t mat_size = nrows_ * ncols_ * elem_size_;    //matrix size in bytes
- void * ptr = allocate(device,mat_size,memkind);    //allocate memory of requested kind on requested device
- location_.emplace_back(Place{device,ptr,memkind}); //save the new memory descriptor (Place)
- if(location_.size() == 1) setBody(); //set matrix body to some value when first allocated
+ size_t mat_size = nrows_ * ncols_ * elem_size_;       //matrix size in bytes
+ void * ptr = allocate(device,mat_size,memkind);       //allocate memory of requested kind on requested device
+ assert(ptr != nullptr);
+ location_.emplace_back(Resource{device,ptr,memkind}); //save the new memory descriptor (Resource)
+ std::cout << "New resource acquired on device " << device << std::endl;
  return;
 }
 
 
 template <typename T>
-void Matrix<T>::setBody()
+void Matrix<T>::zeroBody(int device)
+{
+ T * mat = this->getBodyPtr(device);
+ size_t mat_size = this->getSize();
+ assert(mat != nullptr);
+ if(device < 0){ //Host
+  memset(((void*)mat),0,mat_size);
+ }else{ //Device
+  int dev;
+  cudaError_t cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
+  cuerr = cudaSetDevice(device); assert(cuerr == cudaSuccess);
+  cuerr = cudaMemset(((void*)mat),0,mat_size); assert(cuerr == cudaSuccess);
+  cuerr = cudaSetDevice(dev); assert(cuerr == cudaSuccess);
+ }
+ return;
+}
+
+
+template <typename T>
+void Matrix<T>::setBodyHost()
 {
  T * mat = this->getBodyPtr(-1); //-1 is Host id
  assert(mat != nullptr);
  for(int j = 0; j < ncols_; ++j){
   int offset = j*nrows_;
   for(int i = 0; i < nrows_; ++i){
-   mat[offset+i] = static_cast<T>(1)/(static_cast<T>(i) + static_cast<T>(j));
+   mat[offset+i] = static_cast<T>(1)/(static_cast<T>(i) + static_cast<T>(j)); //some value
   }
  }
  return;

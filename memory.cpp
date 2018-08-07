@@ -47,7 +47,18 @@ void * allocate(int device, size_t size, MemKind mem_kind)
   case MemKind::Pinned:
    if(device < 0){ //Host
     cuerr = cudaHostAlloc(&ptr,size,cudaHostAllocPortable); assert(cuerr == cudaSuccess);
-   }else{ //Device
+   }else{ //Device (fall back to regular)
+    int dev;
+    cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
+    cuerr = cudaSetDevice(device); assert(cuerr == cudaSuccess);
+    cuerr = cudaMalloc(&ptr,size); assert(cuerr == cudaSuccess);
+    cuerr = cudaSetDevice(dev); assert(cuerr == cudaSuccess);
+   }
+   break;
+  case MemKind::Mapped:
+   if(device < 0){ //Host
+    cuerr = cudaHostAlloc(&ptr,size,cudaHostAllocPortable|cudaHostAllocMapped); assert(cuerr == cudaSuccess);
+   }else{ //Device (fall back to regular)
     int dev;
     cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
     cuerr = cudaSetDevice(device); assert(cuerr == cudaSuccess);
@@ -80,6 +91,17 @@ void deallocate(int device, void * ptr, MemKind mem_kind)
   }
   break;
  case MemKind::Pinned:
+  if(device < 0){ //Host
+   cuerr = cudaFreeHost(ptr);
+  }else{ //Device
+   int dev;
+   cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
+   cuerr = cudaSetDevice(device); assert(cuerr == cudaSuccess);
+   cuerr = cudaFree(ptr); assert(cuerr == cudaSuccess);
+   cuerr = cudaSetDevice(dev); assert(cuerr == cudaSuccess);
+  }
+  break;
+ case MemKind::Mapped:
   if(device < 0){ //Host
    cuerr = cudaFreeHost(ptr);
   }else{ //Device
