@@ -1,12 +1,14 @@
 BINARY_NAME = bla_test.x
 
 CXX_COMP = g++
-CXX_FLAGS = -c -O0 -g -std=c++11 -fPIC -D_FORCE_INLINES
+CXX_FLAGS = -c -O3 -std=c++11 -fPIC -D_FORCE_INLINES
+#CXX_FLAGS = -c -O0 -g -std=c++11 -fPIC -D_FORCE_INLINES
 CXX_INC =
 CXX_LIB = -lstdc++
 
 CUDA_COMP = nvcc
-CUDA_FLAGS = --compile -ccbin /usr/bin/g++ -std=c++11 -arch=sm_50 -O0 -g -G -lineinfo -w --resource-usage --ptxas-options=-v -Xcompiler -fPIC -D_FORCE_INLINES
+CUDA_FLAGS = --compile -ccbin /usr/bin/g++ -std=c++11 -arch=sm_50 -O3 -lineinfo -w --resource-usage --ptxas-options=-v -Xcompiler -fPIC -D_FORCE_INLINES
+#CUDA_FLAGS = --compile -ccbin /usr/bin/g++ -std=c++11 -arch=sm_50 -O0 -g -G -lineinfo -w --resource-usage --ptxas-options=-v -Xcompiler -fPIC -D_FORCE_INLINES
 CUDA_INC = -I/usr/local/cuda/include
 CUDA_LIB= -L/usr/local/cuda/lib64 -lcudart -lcublas
 
