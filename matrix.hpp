@@ -46,9 +46,12 @@ public:
  Matrix & operator=(Matrix && matrix) = default;
  virtual ~Matrix();
 
- size_t getSize() const;
+ int getNumRows() const; //returns the number of rows
+ int getNumCols() const; //returns the number of columns
+ size_t getSize() const; //return the size of the matrix in bytes
  T * getBodyPtr(int device) const; //returns a pointer to the memory resource on requested device (if any)
  void allocateBody(int device, MemKind memkind); //allocates memory resource of requested kind on requested device
+ void markBodyStatus(int device, bool status); //marks body status as up-to-date or not (outdated)
  void zeroBody(int device); //initializes matrix body to zero on any device
  void setBodyHost(); //initializes matrix body to some value on Host
 
@@ -58,6 +61,7 @@ private:
   int device;
   void * ptr;
   MemKind memkind;
+  bool uptodate;
  } Resource;
 
  int nrows_;
@@ -88,6 +92,20 @@ Matrix<T>::~Matrix()
 
 
 template <typename T>
+int Matrix<T>::getNumRows() const
+{
+ return nrows_;
+}
+
+
+template <typename T>
+int Matrix<T>::getNumCols() const
+{
+ return ncols_;
+}
+
+
+template <typename T>
 size_t Matrix<T>::getSize() const
 {
  return (static_cast<size_t>(nrows_)*static_cast<size_t>(ncols_)*elem_size_); //matrix size in bytes
@@ -111,8 +129,18 @@ void Matrix<T>::allocateBody(int device, MemKind memkind)
  size_t mat_size = nrows_ * ncols_ * elem_size_;       //matrix size in bytes
  void * ptr = allocate(device,mat_size,memkind);       //allocate memory of requested kind on requested device
  assert(ptr != nullptr);
- location_.emplace_back(Resource{device,ptr,memkind}); //save the new memory descriptor (Resource)
+ location_.emplace_back(Resource{device,ptr,memkind,false}); //save the new memory descriptor (Resource)
  std::cout << "New resource acquired on device " << device << std::endl;
+ return;
+}
+
+
+template <typename T>
+void Matrix<T>::markBodyStatus(int device, bool status)
+{
+ for(auto & loc: location_){
+  if(loc.device == device) loc.uptodate = status;
+ }
  return;
 }
 
@@ -147,6 +175,7 @@ void Matrix<T>::setBodyHost()
    mat[offset+i] = static_cast<T>(1)/(static_cast<T>(i) + static_cast<T>(j)); //some value
   }
  }
+ this->markBodyStatus(-1,true); //mark matrix body on Host as up-to-date
  return;
 }
 
