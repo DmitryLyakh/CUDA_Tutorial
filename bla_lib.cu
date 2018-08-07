@@ -36,6 +36,8 @@ cudaDeviceProp * gpuProperty;
 cublasHandle_t * cublasHandle;
 
 //CUDA kernel prototypes:
+__global__ void gpu_test_presence(size_t str_len, char * __restrict__ dst, const char * __restrict__ src);
+
 template <typename T>
 __global__ void gpu_array_norm(size_t arr_size, const T * __restrict__ arr, volatile T * norm);
 __device__ static unsigned int norm_wr_lock = 0; //reduction lock (per GPU)
@@ -109,9 +111,51 @@ void shutdown()
 }
 
 
-__global__ void gpu_test_presence(size_t str_len, char * dst, const char * src)
+void test_hello()
 {
- 
+ std::cout << "Testing presence on GPU ..." << std::endl;
+ const std::string s1("Am I really on GPU?");
+ const std::string s2("Waiting for the answer ...");
+ const std::string s3("Yes, you are!");
+
+ size_t max_len = std::max(s1.size(),std::max(s2.size(),s3.size()));
+ size_t str_len = max_len+1;
+
+ char * hs1 = static_cast<char*>(bla::allocate(-1,str_len,bla::MemKind::Pinned)); assert(hs1 != nullptr);
+ char * ds1 = static_cast<char*>(bla::allocate(0,str_len,bla::MemKind::Regular)); assert(ds1 != nullptr);
+ int i = 0; for(const char & symb: s1) hs1[i++]=symb; hs1[s1.size()]='\0';
+ printf("%s ",hs1);
+
+ char * hs3 = static_cast<char*>(bla::allocate(-1,str_len,bla::MemKind::Pinned)); assert(hs3 != nullptr);
+ char * ds3 = static_cast<char*>(bla::allocate(0,str_len,bla::MemKind::Regular)); assert(ds3 != nullptr);
+ i = 0; for(const char & symb: s3) hs3[i++]=symb; hs3[s3.size()]='\0';
+
+ cudaError_t cuerr = cudaMemcpy((void*)ds1,(void*)hs1,str_len,cudaMemcpyDefault); assert(cuerr == cudaSuccess);
+ cuerr = cudaMemcpy((void*)ds3,(void*)hs3,str_len,cudaMemcpyDefault); assert(cuerr == cudaSuccess);
+
+ cuerr = cudaGetLastError(); assert(cuerr == cudaSuccess);
+ bla::gpu_test_presence<<<16,256>>>(str_len,ds1,ds3);
+ std::cout << s2 << " ";
+ cuerr = cudaDeviceSynchronize();
+ cuerr = cudaGetLastError(); assert(cuerr == cudaSuccess);
+
+ cuerr = cudaMemcpy((void*)hs1,(void*)ds1,str_len,cudaMemcpyDefault); assert(cuerr == cudaSuccess);
+ printf("%s\n",hs1);
+
+ bla::deallocate(0,(void*)ds3,bla::MemKind::Regular);
+ bla::deallocate(-1,(void*)hs3,bla::MemKind::Pinned);
+
+ bla::deallocate(0,(void*)ds1,bla::MemKind::Regular);
+ bla::deallocate(-1,(void*)hs1,bla::MemKind::Pinned);
+
+ return;
+}
+
+
+__global__ void gpu_test_presence(size_t str_len, char * __restrict__ dst, const char * __restrict__ src)
+{
+ int tid = blockIdx.x * blockDim.x + threadIdx.x;
+ if(tid < str_len) dst[tid] = src[tid];
  return;
 }
 

@@ -37,7 +37,7 @@ void init();
 void shutdown();
 
 //Test hello:
-__global__ void gpu_test_presence(size_t str_len, char * dst, const char * src);
+void test_hello();
 
 } //namespace bla
 
