@@ -65,17 +65,20 @@ void init()
    cuerr = cudaGetDeviceProperties(&(gpuProperty[i]),i); assert(cuerr == cudaSuccess);
    cuberr = cublasCreate(&(cublasHandle[i])); assert(cuberr == CUBLAS_STATUS_SUCCESS);
    cuberr = cublasSetPointerMode(cublasHandle[i],CUBLAS_POINTER_MODE_DEVICE); assert(cuberr == CUBLAS_STATUS_SUCCESS);
+   cuerr = cudaGetLastError(); assert(cuerr == cudaSuccess);
    std::cout << "Initialized GPU " << i << std::endl;
   }
   //Enable P2P access between GPU:
-  for(int i = gpuAmount-1; i >= 0; --i){
-   if(gpuProperty[i].unifiedAddressing != 0){
-    cuerr = cudaSetDevice(i); assert(cuerr == cudaSuccess);
-    for(int j = gpuAmount-1; j >= 0; --j){
-     if(j != i){
-      if(gpuProperty[j].unifiedAddressing != 0){
-       cuerr = cudaDeviceEnablePeerAccess(j,0); assert(cuerr == cudaSuccess);
-       std::cout << "GPU " << i << " can access peer GPU " << j << std::endl;
+  if(gpuAmount > 1){
+   for(int i = gpuAmount-1; i >= 0; --i){
+    if(gpuProperty[i].unifiedAddressing != 0){
+     cuerr = cudaSetDevice(i); assert(cuerr == cudaSuccess);
+     for(int j = gpuAmount-1; j >= 0; --j){
+      if(j != i){
+       if(gpuProperty[j].unifiedAddressing != 0){
+        cuerr = cudaDeviceEnablePeerAccess(j,0); assert(cuerr == cudaSuccess);
+        std::cout << "GPU " << i << " can access peer GPU " << j << std::endl;
+       }
       }
      }
     }
@@ -102,6 +105,13 @@ void shutdown()
  }
  gpuAmount=0;
  std::cout << "BLA library shut down successfully" << std::endl;
+ return;
+}
+
+
+__global__ void gpu_test_presence(size_t str_len, char * dst, const char * src)
+{
+ 
  return;
 }
 

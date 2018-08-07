@@ -36,6 +36,9 @@ void init();
 //Shutdown:
 void shutdown();
 
+//Test hello:
+__global__ void gpu_test_presence(size_t str_len, char * dst, const char * src);
+
 } //namespace bla
 
 #endif //_BLA_LIB_HPP
