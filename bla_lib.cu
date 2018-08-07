@@ -160,6 +160,7 @@ void test_hello()
 void test_norm()
 {
  std::cout << "Testing norm2 on GPU 0 ... ";
+ const float num_tolerance = 1e-5;
  const size_t vol = 1000000;
  const size_t dsize = vol * sizeof(float);
  float * arr0 = static_cast<float*>(allocate(-1,dsize,MemKind::Pinned));
@@ -178,7 +179,7 @@ void test_norm()
  float norm2 = 0.0f;
  cuerr = cudaMemcpy((void*)(&norm2),(void*)dnorm2,sizeof(float),cudaMemcpyDefault);
  std::cout << "Norm2 = " << norm2 << std::endl;
- assert(abs(norm2-1.0f) < 1e-5);
+ assert(abs(norm2-1.0f) < num_tolerance);
 
  deallocate(0,(void*)dnorm2,MemKind::Regular);
  deallocate(0,(void*)arr1,MemKind::Regular);
