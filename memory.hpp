@@ -18,23 +18,23 @@
 !You should have received a copy of the GNU Lesser General Public License
 !along with CUDA BLA. If not, see <http://www.gnu.org/licenses/>. */
 
-#ifndef _BLA_LIB_HPP
-#define _BLA_LIB_HPP
-
-//#include <cuda.h>
-#include <cuda_runtime.h>
-#include <cublas_v2.h>
-
-#include "timer.hpp"
-#include "matrix.hpp"
+#ifndef _MEMORY_HPP
+#define _MEMORY_HPP
 
 namespace bla{
 
-//Initialization:
-void init();
-//Shutdown:
-void shutdown();
+//Memory kinds:
+enum class MemKind{
+ Regular, //regular memory
+ Pinned,  //pinned memory (only matters for Host)
+ Unified  //unified memory
+};
+
+//Allocates memory on any device (Host:-1; Device:>=0):
+void * allocate(int device, size_t size, MemKind mem_kind);
+//Deallocates memory on any device (Host:-1; Device:>=0):
+void deallocate(int device, void * ptr, MemKind mem_kind);
 
 } //namespace bla
 
-#endif //_BLA_LIB_HPP
+#endif //_MEMORY_HPP

@@ -22,10 +22,23 @@
 
 #include "bla_lib.hpp"
 
-int main(int argc, char ** argv){
+void test_bla()
+{
+//Create matrices on Host:
+ bla::Matrix<float> A(1000,1000);
+
+ return;
+}
+
+
+int main(int argc, char ** argv)
+{
 
 //Init the BLA library:
  bla::init();
+
+//Test BLA:
+ test_bla();
 
 //Shutdown the BLA library:
  bla::shutdown();
