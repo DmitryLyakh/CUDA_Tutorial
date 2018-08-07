@@ -95,6 +95,7 @@ void init()
     }
    }
   }
+  cuerr = cudaGetLastError();
  }
  std::cout << "BLA library initialized successfully" << std::endl;
  return;
