@@ -31,9 +31,25 @@ static int gpuAmount = 0;
 
 //CUDA device properties:
 cudaDeviceProp * gpuProperty;
+
 //cuBLAS handles (one per device):
 cublasHandle_t * cublasHandle;
 
+//CUDA kernel prototypes:
+template <typename T>
+__global__ void gpu_array_norm(size_t arr_size, const T * __restrict__ arr, volatile T * norm);
+__device__ static unsigned int norm_wr_lock = 0; //reduction lock (per GPU)
+
+template <typename T>
+__global__ void gpu_array_add(size_t arr_size, T * __restrict__ arr0, const T * __restrict__ arr1);
+
+template <typename T>
+__global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
+static const int TILE_EXT_X = 16;
+static const int TILE_EXT_Y = 16;
+
+
+//DEFINITIONS:
 void init()
 {
  gpuAmount=0;
@@ -70,6 +86,7 @@ void init()
  return;
 }
 
+
 void shutdown()
 {
  if(gpuAmount > 0){
@@ -85,6 +102,55 @@ void shutdown()
  }
  gpuAmount=0;
  std::cout << "BLA library shut down successfully" << std::endl;
+ return;
+}
+
+
+template <typename T>
+__global__ void gpu_array_norm(size_t arr_size, const T * __restrict__ arr, volatile T * norm)
+{
+ extern __shared__ T thread_norm[]; //blockDim.x
+
+ size_t n = gridDim.x*blockDim.x;
+ T tnorm = static_cast<T>(0.0);
+ for(size_t i = blockIdx.x*blockDim.x + threadIdx.x; i < arr_size; i += n) tnorm += arr[i] * arr[i];
+ thread_norm[threadIdx.x] = tnorm;
+ __syncthreads();
+
+ unsigned int s = blockDim.x;
+ while(s > 1){
+  unsigned int j = (s+1U)>>1; //=(s+1)/2
+  if(threadIdx.x + j < s) thread_norm[threadIdx.x] += thread_norm[threadIdx.x+j];
+  __syncthreads();
+  s=j;
+ }
+
+ if(threadIdx.x == 0){
+  unsigned int j = 1;
+  while(j){j = atomicMax(&norm_wr_lock,1);} //lock
+  *norm += thread_norm[0]; //accumulate
+  __threadfence();
+  j=atomicExch(&norm_wr_lock,0); //unlock
+ }
+ __syncthreads();
+ return;
+}
+
+
+template <typename T>
+__global__ void gpu_array_add(size_t arr_size, T * __restrict__ arr0, const T * __restrict__ arr1)
+{
+ size_t n = gridDim.x * blockDim.x;
+ for(size_t i = blockIdx.x*blockDim.x + threadIdx.x; i < arr_size; i += n) arr0[i] += arr1[i];
+ return;
+}
+
+
+template <typename T>
+__global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+{
+ T __shared__ lbuf[TILE_EXT_X][TILE_EXT_Y],rbuf[TILE_EXT_X][TILE_EXT_Y];
+
  return;
 }
 
