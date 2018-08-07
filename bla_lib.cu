@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <iostream>
 #include <assert.h>
+#include <cmath>
 
 #include "bla_lib.hpp"
 
@@ -158,21 +159,30 @@ void test_hello()
 
 void test_norm()
 {
- std::cout << "Testing norm2 on GPU 0 ..." << std::endl;
- size_t vol = 1000000;
- float * arr0 = static_cast<float*>(allocate(-1,vol,MemKind::Pinned));
- float * arr1 = static_cast<float*>(allocate(0,vol,MemKind::Regular));
- float * dnorm2 = static_cast<float*>(allocate(0,1,MemKind::Regular));
+ std::cout << "Testing norm2 on GPU 0 ... ";
+ const size_t vol = 1000000;
+ const size_t dsize = vol * sizeof(float);
+ float * arr0 = static_cast<float*>(allocate(-1,dsize,MemKind::Pinned));
+ float * arr1 = static_cast<float*>(allocate(0,dsize,MemKind::Regular));
+ float * dnorm2 = static_cast<float*>(allocate(0,sizeof(float),MemKind::Regular));
 
- cudaError_t cuerr = cudaMemcpy((void*)arr1,(void*)arr0,vol*sizeof(float),cudaMemcpyDefault);
+ for(size_t i = 0; i < vol; ++i) arr0[i]=1.0/sqrt((float)vol); //value of each element to make norm equal 1
+
+ cudaError_t cuerr = cudaMemcpy((void*)arr1,(void*)arr0,dsize,cudaMemcpyDefault);
+
+ unsigned int numBlocks = 1024; unsigned int numThreads = 256;
+ gpu_array_norm<<<numBlocks,numThreads,numThreads*sizeof(float)>>>(vol,arr1,dnorm2);
+ cuerr = cudaDeviceSynchronize();
+ cuerr = cudaGetLastError(); assert(cuerr == cudaSuccess);
 
  float norm2 = 0.0f;
-
+ cuerr = cudaMemcpy((void*)(&norm2),(void*)dnorm2,sizeof(float),cudaMemcpyDefault);
+ std::cout << "Norm2 = " << norm2 << std::endl;
+ assert(abs(norm2-1.0f) < 1e-5);
 
  deallocate(0,(void*)dnorm2,MemKind::Regular);
  deallocate(0,(void*)arr1,MemKind::Regular);
  deallocate(-1,(void*)arr0,MemKind::Pinned);
- std::cout << "Norm2 = " << norm2 << std::endl;
  return;
 }
 
@@ -199,7 +209,7 @@ __global__ void gpu_array_norm(size_t arr_size, const T * __restrict__ arr, vola
  extern __shared__ T thread_norm[]; //blockDim.x
 
  size_t n = gridDim.x*blockDim.x;
- T tnorm = static_cast<T>(0.0);
+ T tnorm = static_cast<T>(0);
  for(size_t i = blockIdx.x*blockDim.x + threadIdx.x; i < arr_size; i += n) tnorm += arr[i] * arr[i];
  thread_norm[threadIdx.x] = tnorm;
  __syncthreads();
