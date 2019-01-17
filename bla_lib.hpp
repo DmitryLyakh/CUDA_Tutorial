@@ -18,8 +18,8 @@
 !You should have received a copy of the GNU Lesser General Public License
 !along with CUDA BLA. If not, see <http://www.gnu.org/licenses/>. */
 
-#ifndef _BLA_LIB_HPP
-#define _BLA_LIB_HPP
+#ifndef BLA_LIB_HPP_
+#define BLA_LIB_HPP_
 
 //#include <cuda.h>
 #include <cuda_runtime.h>
@@ -41,4 +41,4 @@ void test_bla();
 
 } //namespace bla
 
-#endif //_BLA_LIB_HPP
+#endif //BLA_LIB_HPP_

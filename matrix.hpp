@@ -18,8 +18,8 @@
 !You should have received a copy of the GNU Lesser General Public License
 !along with CUDA BLA. If not, see <http://www.gnu.org/licenses/>. */
 
-#ifndef _MATRIX_HPP
-#define _MATRIX_HPP
+#ifndef MATRIX_HPP_
+#define MATRIX_HPP_
 
 #include <assert.h>
 #include <string.h>
@@ -182,4 +182,4 @@ void Matrix<T>::setBodyHost()
 
 } //namespace bla
 
-#endif //_MATRIX_HPP
+#endif //MATRIX_HPP_

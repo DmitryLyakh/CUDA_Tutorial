@@ -18,8 +18,8 @@
 !You should have received a copy of the GNU Lesser General Public License
 !along with CUDA BLA. If not, see <http://www.gnu.org/licenses/>. */
 
-#ifndef _MEMORY_HPP
-#define _MEMORY_HPP
+#ifndef MEMORY_HPP_
+#define MEMORY_HPP_
 
 namespace bla{
 
@@ -38,4 +38,4 @@ void deallocate(int device, void * ptr, MemKind mem_kind);
 
 } //namespace bla
 
-#endif //_MEMORY_HPP
+#endif //MEMORY_HPP_

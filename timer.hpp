@@ -18,8 +18,8 @@
 !You should have received a copy of the GNU Lesser General Public License
 !along with CUDA BLA. If not, see <http://www.gnu.org/licenses/>. */
 
-#ifndef _TIMER_HPP
-#define _TIMER_HPP
+#ifndef TIMER_HPP_
+#define TIMER_HPP_
 
 namespace bla{
 
@@ -28,4 +28,4 @@ double time_high_sec(); //high-resolution time stamp in seconds
 
 } //namespace bla
 
-#endif //_TIMER_HPP
+#endif //TIMER_HPP_

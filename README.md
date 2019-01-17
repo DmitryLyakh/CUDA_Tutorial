@@ -11,7 +11,8 @@ Persistent location:
 https://github.com/DmitryLyakh/CUDA_Tutorial.git
 
 BUILD:
-1. Prerequisites: Linux, g++ 5+, CUDA 9+
-2. Update CUDA_INC and CUDA_LIB paths in the Makefile
-3. Adjust the -arch=sm_35 flag to your GPU compute capability.
-4. make
+1. Prerequisites: Linux, g++ 5+, CUDA 9+.
+2. Update CUDA_INC and CUDA_LIB paths in the Makefile (if needed).
+3. Adjust CUDA_ARCH in the Makefile to your GPU compute capability.
+4. If your g++ compiler is too new for CUDA, provide an older one in CUDA_HOST.
+5. make

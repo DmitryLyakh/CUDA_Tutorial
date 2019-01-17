@@ -231,6 +231,7 @@ __global__ void gpu_array_norm(size_t arr_size, const T * __restrict__ arr, vola
  if(threadIdx.x == 0){
   unsigned int j = 1;
   while(j){j = atomicMax(&norm_wr_lock,1);} //lock
+  __threadfence();
   *norm += thread_norm[0]; //accumulate
   __threadfence();
   j=atomicExch(&norm_wr_lock,0); //unlock
