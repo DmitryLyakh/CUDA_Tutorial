@@ -18,9 +18,9 @@
 !You should have received a copy of the GNU Lesser General Public License
 !along with CUDA BLA. If not, see <http://www.gnu.org/licenses/>. */
 
-#include <chrono>
-
 #include "timer.hpp"
+
+#include <chrono>
 
 namespace bla{
 
@@ -30,6 +30,7 @@ double time_sys_sec()
  auto durat = std::chrono::duration<double>(stamp.time_since_epoch()); //duration (sec) since the begining of the clock
  return durat.count(); //number of seconds
 }
+
 
 double time_high_sec()
 {

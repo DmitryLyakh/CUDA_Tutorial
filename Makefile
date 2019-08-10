@@ -1,8 +1,7 @@
 BINARY_NAME = bla_test.x
 
 CXX_COMP = g++
-CXX_FLAGS = -c -O3 -std=c++11 -fPIC -D_FORCE_INLINES
-#CXX_FLAGS = -c -O0 -std=c++11 -fPIC -D_FORCE_INLINES -g
+CXX_FLAGS = -c -O3 -std=c++11 -fPIC -D_FORCE_INLINES -g
 CXX_INC =
 CXX_LIB = -lstdc++
 
@@ -11,8 +10,7 @@ CUDA_HOST = /usr/bin/g++
 CUDA_ARCH = sm_35
 CUDA_INC = -I/usr/local/cuda/include
 CUDA_LIB = -L/usr/local/cuda/lib64 -lcublas -lcudart
-CUDA_FLAGS = --compile -ccbin $(CUDA_HOST) -std=c++11 -arch=$(CUDA_ARCH) -O3 -lineinfo -w --resource-usage --ptxas-options=-v -Xcompiler -fPIC -D_FORCE_INLINES
-#CUDA_FLAGS = --compile -ccbin $(CUDA_HOST) -std=c++11 -arch=$(CUDA_ARCH) -O0 -g -G -lineinfo -w --resource-usage --ptxas-options=-v -Xcompiler -fPIC -D_FORCE_INLINES
+CUDA_FLAGS = --compile -ccbin $(CUDA_HOST) -std=c++11 -arch=$(CUDA_ARCH) -O3 -lineinfo -w --resource-usage --ptxas-options=-v -Xcompiler -fPIC -D_FORCE_INLINES -g -G
 
 LINK_FLAGS = -fPIC
 

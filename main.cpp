@@ -45,7 +45,7 @@ void use_bla()
  //Create matrix C:
  bla::Matrix<float> C(1000,3000);
  //Allocate matrix C body on GPU#0:
- C.allocateBody(0,bla::MemKind::Pinned);
+ C.allocateBody(0,bla::MemKind::Regular);
  //Set matrix C body to zero:
  C.zeroBody(0);
 

@@ -21,16 +21,17 @@
 #ifndef MATRIX_HPP_
 #define MATRIX_HPP_
 
-#include <assert.h>
-#include <string.h>
-#include <vector>
+#include "memory.hpp"
+#include "timer.hpp"
 
 //#include <cuda.h>
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 
-#include "timer.hpp"
-#include "memory.hpp"
+#include <iostream>
+#include <cassert>
+#include <list>
+#include <type_traits>
 
 namespace bla{
 
@@ -39,24 +40,35 @@ class Matrix{
 
 public:
 
- Matrix(int nrows, int ncols);
+ explicit Matrix(int nrows, int ncols);
  Matrix(const Matrix & matrix) = delete;
  Matrix & operator=(const Matrix &) = delete;
- Matrix(Matrix && matrix) = default;
- Matrix & operator=(Matrix && matrix) = default;
+ Matrix(Matrix && matrix) noexcept = default;
+ Matrix & operator=(Matrix && matrix) noexcept = default;
  virtual ~Matrix();
 
- int getNumRows() const; //returns the number of rows
- int getNumCols() const; //returns the number of columns
- size_t getSize() const; //return the size of the matrix in bytes
- T * getBodyPtr(int device) const; //returns a pointer to the memory resource on requested device (if any)
- void allocateBody(int device, MemKind memkind); //allocates memory resource of requested kind on requested device
- void markBodyStatus(int device, bool status); //marks body status as up-to-date or not (outdated)
- void zeroBody(int device); //initializes matrix body to zero on any device
- void setBodyHost(); //initializes matrix body to some value on Host
+ /** Returns the number of rows **/
+ int getNumRows() const;
+ /** Returns the number of columns **/
+ int getNumCols() const;
+ /** Returns the size of the matrix in bytes **/
+ std::size_t getSize() const;
+ /** Returns a pointer to the memory resource on requested device (if any) **/
+ T * getBodyPtr(int device) const;
+ /** Allocates memory resource of requested kind on requested device **/
+ void allocateBody(int device, MemKind memkind = MemKind::Regular);
+ /** Deallocates memory resource on requested device **/
+ void deallocateBody(int device);
+ /** Marks matrix body status as up-to-date or not (outdated) **/
+ void markBodyStatus(int device, bool status);
+ /** Initializes matrix body to zero on requested device **/
+ void zeroBody(int device);
+ /** Initializes matrix body to some non-trivial value on Host **/
+ void setBodyHost();
 
 private:
 
+ //Memory resource descriptor:
  typedef struct{
   int device;
   void * ptr;
@@ -64,18 +76,20 @@ private:
   bool uptodate;
  } Resource;
 
+ //Data members:
  int nrows_;
  int ncols_;
- size_t elem_size_;
- std::vector<Resource> location_;
+ std::size_t elem_size_;
+ std::list<Resource> location_;
 };
 
 
 //TEMPLATE DEFINITIONS:
 template <typename T>
 Matrix<T>::Matrix(int nrows, int ncols):
- nrows_(nrows),ncols_(ncols),elem_size_(sizeof(T))
+ nrows_(nrows), ncols_(ncols), elem_size_(sizeof(T))
 {
+ static_assert(std::is_floating_point<T>::value,"#ERROR(BLA::Matrix::Matrix): Matrix type must be floating point!");
  assert(nrows_ > 0 && ncols_ > 0 && elem_size_ > 0);
  std::cout << "Matrix created with dimensions (" << nrows_ << "," << ncols_ << ")" << std::endl;
 }
@@ -84,9 +98,7 @@ Matrix<T>::Matrix(int nrows, int ncols):
 template <typename T>
 Matrix<T>::~Matrix()
 {
- for(auto & loc: location_){
-  deallocate(loc.device,loc.ptr,loc.memkind);
- }
+ for(auto & loc: location_) deallocate(loc.ptr);
  std::cout << "Matrix destroyed" << std::endl;
 }
 
@@ -106,9 +118,9 @@ int Matrix<T>::getNumCols() const
 
 
 template <typename T>
-size_t Matrix<T>::getSize() const
+std::size_t Matrix<T>::getSize() const
 {
- return (static_cast<size_t>(nrows_)*static_cast<size_t>(ncols_)*elem_size_); //matrix size in bytes
+ return (static_cast<std::size_t>(nrows_)*static_cast<std::size_t>(ncols_)*elem_size_); //matrix size in bytes
 }
 
 
@@ -117,7 +129,10 @@ T * Matrix<T>::getBodyPtr(int device) const
 {
  T * ptr = nullptr;
  for(const auto & loc: location_){
-  if(loc.device == device) ptr = static_cast<T*>(loc.ptr);
+  if(loc.device == device){
+   ptr = static_cast<T*>(loc.ptr);
+   break;
+  }
  }
  return ptr;
 }
@@ -126,11 +141,25 @@ T * Matrix<T>::getBodyPtr(int device) const
 template <typename T>
 void Matrix<T>::allocateBody(int device, MemKind memkind)
 {
- size_t mat_size = nrows_ * ncols_ * elem_size_;       //matrix size in bytes
- void * ptr = allocate(device,mat_size,memkind);       //allocate memory of requested kind on requested device
+ std::size_t mat_size = this->getSize();         //matrix size in bytes
+ void * ptr = allocate(mat_size,device,memkind); //allocate memory of requested kind on requested device
  assert(ptr != nullptr);
  location_.emplace_back(Resource{device,ptr,memkind,false}); //save the new memory descriptor (Resource)
  std::cout << "New resource acquired on device " << device << std::endl;
+ return;
+}
+
+
+template <typename T>
+void Matrix<T>::deallocateBody(int device)
+{
+ for(auto & loc: location_){
+  if(loc.device == device){
+   deallocate(loc.ptr);
+   std::cout << "Resource released on device " << device << std::endl;
+  }
+ }
+ location_.remove_if([device](const Resource & res){return (res.device == device);});
  return;
 }
 
@@ -149,17 +178,22 @@ template <typename T>
 void Matrix<T>::zeroBody(int device)
 {
  T * mat = this->getBodyPtr(device);
- size_t mat_size = this->getSize();
- assert(mat != nullptr);
+ std::size_t mat_size = this->getSize();
+ assert(mat != nullptr && mat_size > 0);
  if(device < 0){ //Host
   memset(((void*)mat),0,mat_size);
- }else{ //Device
+ }else{ //GPU device
   int dev;
   cudaError_t cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
-  cuerr = cudaSetDevice(device); assert(cuerr == cudaSuccess);
+  if(device != dev){
+   cuerr = cudaSetDevice(device); assert(cuerr == cudaSuccess);
+  }
   cuerr = cudaMemset(((void*)mat),0,mat_size); assert(cuerr == cudaSuccess);
-  cuerr = cudaSetDevice(dev); assert(cuerr == cudaSuccess);
+  if(device != dev){
+   cuerr = cudaSetDevice(dev); assert(cuerr == cudaSuccess);
+  }
  }
+ this->markBodyStatus(device,true); //mark matrix body on device as up-to-date
  return;
 }
 
@@ -167,18 +201,20 @@ void Matrix<T>::zeroBody(int device)
 template <typename T>
 void Matrix<T>::setBodyHost()
 {
- T * mat = this->getBodyPtr(-1); //-1 is Host id
- assert(mat != nullptr);
- for(int j = 0; j < ncols_; ++j){
-  int offset = j*nrows_;
-  for(int i = 0; i < nrows_; ++i){
+ T * mat = this->getBodyPtr(-1); //-1 is Host device id
+ if(mat == nullptr){
+  std::cout << "#ERROR(BLA::Matrix::setBodyHost): Matrix does not exist on Host!" << std::endl;
+  assert(false);
+ }
+ for(std::size_t j = 0; j < ncols_; ++j){
+  std::size_t offset = j*nrows_;
+  for(std::size_t i = 0; i < nrows_; ++i){
    mat[offset+i] = static_cast<T>(1)/(static_cast<T>(i) + static_cast<T>(j)); //some value
   }
  }
  this->markBodyStatus(-1,true); //mark matrix body on Host as up-to-date
  return;
 }
-
 
 } //namespace bla
 

@@ -18,12 +18,12 @@
 !You should have received a copy of the GNU Lesser General Public License
 !along with CUDA BLA. If not, see <http://www.gnu.org/licenses/>. */
 
-#include <stdio.h>
-#include <iostream>
-#include <assert.h>
-#include <cmath>
-
 #include "bla_lib.hpp"
+
+#include <cstdio>
+#include <iostream>
+#include <cassert>
+#include <cmath>
 
 namespace bla{
 
@@ -131,20 +131,20 @@ void test_hello()
  size_t max_len = std::max(s1.size(),std::max(s2.size(),s3.size()));
  size_t str_len = max_len+1;
 
- char * hs1 = static_cast<char*>(bla::allocate(-1,str_len,bla::MemKind::Pinned)); assert(hs1 != nullptr);
- char * ds1 = static_cast<char*>(bla::allocate(0,str_len,bla::MemKind::Regular)); assert(ds1 != nullptr);
+ char * hs1 = static_cast<char*>(allocate(str_len,-1,MemKind::Pinned)); assert(hs1 != nullptr);
+ char * ds1 = static_cast<char*>(allocate(str_len,0,MemKind::Regular)); assert(ds1 != nullptr);
  int i = 0; for(const char & symb: s1) hs1[i++]=symb; hs1[s1.size()]='\0';
  printf("%s ",hs1);
 
- char * hs3 = static_cast<char*>(bla::allocate(-1,str_len,bla::MemKind::Pinned)); assert(hs3 != nullptr);
- char * ds3 = static_cast<char*>(bla::allocate(0,str_len,bla::MemKind::Regular)); assert(ds3 != nullptr);
+ char * hs3 = static_cast<char*>(allocate(str_len,-1,MemKind::Pinned)); assert(hs3 != nullptr);
+ char * ds3 = static_cast<char*>(allocate(str_len,0,MemKind::Regular)); assert(ds3 != nullptr);
  i = 0; for(const char & symb: s3) hs3[i++]=symb; hs3[s3.size()]='\0';
 
  cudaError_t cuerr = cudaMemcpy((void*)ds1,(void*)hs1,str_len,cudaMemcpyDefault); assert(cuerr == cudaSuccess);
  cuerr = cudaMemcpy((void*)ds3,(void*)hs3,str_len,cudaMemcpyDefault); assert(cuerr == cudaSuccess);
 
  cuerr = cudaGetLastError(); assert(cuerr == cudaSuccess);
- bla::gpu_test_presence<<<16,256>>>(str_len,ds1,ds3);
+ gpu_test_presence<<<16,256>>>(str_len,ds1,ds3);
  std::cout << s2 << " ";
  cuerr = cudaDeviceSynchronize();
  cuerr = cudaGetLastError(); assert(cuerr == cudaSuccess);
@@ -152,11 +152,11 @@ void test_hello()
  cuerr = cudaMemcpy((void*)hs1,(void*)ds1,str_len,cudaMemcpyDefault); assert(cuerr == cudaSuccess);
  printf("%s\n",hs1);
 
- bla::deallocate(0,(void*)ds3,bla::MemKind::Regular);
- bla::deallocate(-1,(void*)hs3,bla::MemKind::Pinned);
+ deallocate((void*)ds3);
+ deallocate((void*)hs3);
 
- bla::deallocate(0,(void*)ds1,bla::MemKind::Regular);
- bla::deallocate(-1,(void*)hs1,bla::MemKind::Pinned);
+ deallocate((void*)ds1);
+ deallocate((void*)hs1);
 
  return;
 }
@@ -168,9 +168,9 @@ void test_norm()
  const float num_tolerance = 1e-5;
  const size_t vol = 1000000;
  const size_t dsize = vol * sizeof(float);
- float * arr0 = static_cast<float*>(allocate(-1,dsize,MemKind::Pinned));
- float * arr1 = static_cast<float*>(allocate(0,dsize,MemKind::Regular));
- float * dnorm2 = static_cast<float*>(allocate(0,sizeof(float),MemKind::Regular));
+ float * arr0 = static_cast<float*>(allocate(dsize,-1,MemKind::Pinned));
+ float * arr1 = static_cast<float*>(allocate(dsize,0,MemKind::Regular));
+ float * dnorm2 = static_cast<float*>(allocate(sizeof(float),0,MemKind::Regular));
 
  for(size_t i = 0; i < vol; ++i) arr0[i]=1.0/sqrt((float)vol); //value of each element to make norm equal 1
 
@@ -186,9 +186,9 @@ void test_norm()
  std::cout << "Norm2 = " << norm2 << std::endl;
  assert(abs(norm2-1.0f) < num_tolerance);
 
- deallocate(0,(void*)dnorm2,MemKind::Regular);
- deallocate(0,(void*)arr1,MemKind::Regular);
- deallocate(-1,(void*)arr0,MemKind::Pinned);
+ deallocate((void*)dnorm2);
+ deallocate((void*)arr1);
+ deallocate((void*)arr0);
  return;
 }
 

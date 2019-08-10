@@ -21,22 +21,23 @@
 #ifndef BLA_LIB_HPP_
 #define BLA_LIB_HPP_
 
+#include "matrix.hpp"
+#include "memory.hpp"
+#include "timer.hpp"
+
 //#include <cuda.h>
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 
-#include "timer.hpp"
-#include "memory.hpp"
-#include "matrix.hpp"
-
 namespace bla{
 
-//Initialization:
+/** Initialization **/
 void init();
-//Shutdown:
+
+/** Shutdown **/
 void shutdown();
 
-//Tests:
+//Testing:
 void test_bla();
 
 } //namespace bla

@@ -21,20 +21,25 @@
 #ifndef MEMORY_HPP_
 #define MEMORY_HPP_
 
+#include <cstdlib>
+
 namespace bla{
 
 //Memory kinds:
 enum class MemKind{
- Regular, //regular memory
- Pinned,  //pinned memory (only matters for Host)
- Mapped,  //mapped pinned memory (only matters for Host)
- Unified  //unified memory
+ Regular, //regular global memory (either Host or Device)
+ Pinned,  //pinned memory (only Host)
+ Mapped,  //mapped pinned memory (only Host)
+ Unified  //unified memory (regardless)
 };
 
-//Allocates memory on any device (Host:-1; Device:>=0):
-void * allocate(int device, size_t size, MemKind mem_kind);
-//Deallocates memory on any device (Host:-1; Device:>=0):
-void deallocate(int device, void * ptr, MemKind mem_kind);
+//Allocates memory on any device (Host: -1; Device: >=0):
+void * allocate(size_t size,                          //in: requested memory size in bytes
+                int device = -1,                      //in: device (-1: Host; >=0: corresponding GPU)
+                MemKind mem_kind = MemKind::Regular); //in: requested memory kind
+
+//Deallocates previously allocated memory on any device:
+void deallocate(void * ptr); //in: pointer to previously allocated memory
 
 } //namespace bla
 

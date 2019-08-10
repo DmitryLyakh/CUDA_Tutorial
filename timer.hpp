@@ -23,8 +23,11 @@
 
 namespace bla{
 
-double time_sys_sec();  //system time stamp in seconds (thread-global)
-double time_high_sec(); //high-resolution time stamp in seconds
+/** System time stamp in seconds (thread-global) **/
+double time_sys_sec();
+
+/** High-resolution time stamp in seconds **/
+double time_high_sec();
 
 } //namespace bla
 

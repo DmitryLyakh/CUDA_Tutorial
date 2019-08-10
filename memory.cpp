@@ -18,65 +18,95 @@
 !You should have received a copy of the GNU Lesser General Public License
 !along with CUDA BLA. If not, see <http://www.gnu.org/licenses/>. */
 
-#include <stdlib.h>
-#include <assert.h>
+#include "memory.hpp"
 
 #include <cuda_runtime.h>
 
-#include "memory.hpp"
+#include <cassert>
+
+#include <iostream>
+#include <map>
 
 namespace bla{
 
-void * allocate(int device, size_t size, MemKind mem_kind)
+//Memory chunk descriptor:
+typedef struct{
+ int device;
+ MemKind mem_kind;
+ size_t mem_size;
+} MemChunkDescr;
+
+
+//Register of allocated memory chunks:
+std::map<void*,MemChunkDescr> mem_reg;
+
+
+void * allocate(size_t size, int device, MemKind mem_kind)
 {
  void * ptr = nullptr;
  cudaError_t cuerr;
+
  if(size > 0){
+  //Allocated memory:
   switch(mem_kind){
   case MemKind::Regular:
    if(device < 0){ //Host
     ptr = malloc(size);
-   }else{ //Device
+   }else{ //GPU device
     int dev;
     cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
-    cuerr = cudaSetDevice(device); assert(cuerr == cudaSuccess);
+    if(device != dev){
+     cuerr = cudaSetDevice(device); assert(cuerr == cudaSuccess);
+    }
     cuerr = cudaMalloc(&ptr,size); assert(cuerr == cudaSuccess);
-    cuerr = cudaSetDevice(dev); assert(cuerr == cudaSuccess);
+    if(device != dev){
+     cuerr = cudaSetDevice(dev); assert(cuerr == cudaSuccess);
+    }
    }
    break;
   case MemKind::Pinned:
    if(device < 0){ //Host
     cuerr = cudaHostAlloc(&ptr,size,cudaHostAllocPortable); assert(cuerr == cudaSuccess);
-   }else{ //Device (fall back to regular)
-    int dev;
-    cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
-    cuerr = cudaSetDevice(device); assert(cuerr == cudaSuccess);
-    cuerr = cudaMalloc(&ptr,size); assert(cuerr == cudaSuccess);
-    cuerr = cudaSetDevice(dev); assert(cuerr == cudaSuccess);
+   }else{ //GPU device
+    std::cout << "#ERROR(BLA::memory::allocate): Pinned memory is not available on GPU!" << std::endl;
+    assert(false);
    }
    break;
   case MemKind::Mapped:
    if(device < 0){ //Host
     cuerr = cudaHostAlloc(&ptr,size,cudaHostAllocPortable|cudaHostAllocMapped); assert(cuerr == cudaSuccess);
-   }else{ //Device (fall back to regular)
-    int dev;
-    cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
-    cuerr = cudaSetDevice(device); assert(cuerr == cudaSuccess);
-    cuerr = cudaMalloc(&ptr,size); assert(cuerr == cudaSuccess);
-    cuerr = cudaSetDevice(dev); assert(cuerr == cudaSuccess);
+   }else{ //GPU device
+    std::cout << "#ERROR(BLA::memory::allocate): Mapped pinned memory is not available on GPU!" << std::endl;
+    assert(false);
    }
    break;
   case MemKind::Unified:
+   std::cout << "#ERROR(BLA::memory::allocate): Unified memory allocation is not implemented!" << std::endl;
    assert(false);
    break;
   }
  }
+ //Register memory with BLA:
+ if(ptr != nullptr){
+  auto res = mem_reg.emplace(std::make_pair(ptr,MemChunkDescr{device,mem_kind,size}));
+  assert(res.second);
+ }
  return ptr;
 }
 
-void deallocate(int device, void * ptr, MemKind mem_kind)
+
+void deallocate(void * ptr)
 {
  assert(ptr != nullptr);
+ //Find the memory chunk descriptor:
+ auto pos = mem_reg.find(ptr);
+ if(pos == mem_reg.end()){
+  std::cout << "#ERROR(BLA::memory::deallocate): Attempt to deallocate a pointer not allocated by BLA!" << std::endl;
+  assert(false);
+ }
+ auto device = pos->second.device;
+ auto mem_kind = pos->second.mem_kind;
+ //Deallocate memory:
  cudaError_t cuerr;
  switch(mem_kind){
  case MemKind::Regular:
@@ -85,37 +115,28 @@ void deallocate(int device, void * ptr, MemKind mem_kind)
   }else{ //Device
    int dev;
    cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
-   cuerr = cudaSetDevice(device); assert(cuerr == cudaSuccess);
+   if(device != dev){
+    cuerr = cudaSetDevice(device); assert(cuerr == cudaSuccess);
+   }
    cuerr = cudaFree(ptr); assert(cuerr == cudaSuccess);
-   cuerr = cudaSetDevice(dev); assert(cuerr == cudaSuccess);
+   if(device != dev){
+    cuerr = cudaSetDevice(dev); assert(cuerr == cudaSuccess);
+   }
   }
   break;
  case MemKind::Pinned:
-  if(device < 0){ //Host
-   cuerr = cudaFreeHost(ptr);
-  }else{ //Device
-   int dev;
-   cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
-   cuerr = cudaSetDevice(device); assert(cuerr == cudaSuccess);
-   cuerr = cudaFree(ptr); assert(cuerr == cudaSuccess);
-   cuerr = cudaSetDevice(dev); assert(cuerr == cudaSuccess);
-  }
+  cuerr = cudaFreeHost(ptr); assert(cuerr == cudaSuccess);
   break;
  case MemKind::Mapped:
-  if(device < 0){ //Host
-   cuerr = cudaFreeHost(ptr);
-  }else{ //Device
-   int dev;
-   cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
-   cuerr = cudaSetDevice(device); assert(cuerr == cudaSuccess);
-   cuerr = cudaFree(ptr); assert(cuerr == cudaSuccess);
-   cuerr = cudaSetDevice(dev); assert(cuerr == cudaSuccess);
-  }
+  cuerr = cudaFreeHost(ptr); assert(cuerr == cudaSuccess);
   break;
  case MemKind::Unified:
+  std::cout << "#ERROR(BLA::memory::deallocate): Unified memory allocation is not implemented!" << std::endl;
   assert(false);
   break;
  }
+ //Delete memory chunk descriptor:
+ mem_reg.erase(ptr);
  return;
 }
 
