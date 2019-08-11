@@ -31,13 +31,13 @@
 
 namespace bla{
 
-/** Initialization **/
+/** Initialization of BLA **/
 void init();
 
-/** Shutdown **/
+/** Shutdown of BLA **/
 void shutdown();
 
-//Testing:
+/** Testing BLA **/
 void test_bla();
 
 } //namespace bla

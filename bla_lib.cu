@@ -21,16 +21,17 @@
 #include "bla_lib.hpp"
 
 #include <cstdio>
-#include <iostream>
 #include <cassert>
 #include <cmath>
+
+#include <iostream>
 
 namespace bla{
 
 //Number of present GPU devices:
-static int gpuAmount = 0;
+static int totalNumGPUs = 0;
 
-//CUDA device properties:
+//CUDA device properties (for all GPU devices):
 cudaDeviceProp * gpuProperty;
 
 //cuBLAS handles (one per device):
@@ -56,18 +57,17 @@ void test_hello();
 void test_norm();
 
 
-//DEFINITIONS:
 void init()
 {
- gpuAmount=0;
- cudaError_t cuerr = cudaGetDeviceCount(&gpuAmount); assert(cuerr == cudaSuccess);
- std::cout << "Found " << gpuAmount << " NVIDIA GPU" << std::endl;
- if(gpuAmount > 0){
+ totalNumGPUs = 0;
+ cudaError_t cuerr = cudaGetDeviceCount(&totalNumGPUs); assert(cuerr == cudaSuccess);
+ std::cout << "Found " << totalNumGPUs << " NVIDIA GPU" << std::endl;
+ if(totalNumGPUs > 0){
   cublasStatus_t cuberr;
-  gpuProperty = new cudaDeviceProp[gpuAmount];
-  cublasHandle = new cublasHandle_t[gpuAmount];
+  gpuProperty = new cudaDeviceProp[totalNumGPUs];
+  cublasHandle = new cublasHandle_t[totalNumGPUs];
   //Init each GPU:
-  for(int i = gpuAmount-1; i >= 0; --i){
+  for(int i = (totalNumGPUs - 1); i >= 0; --i){
    cuerr = cudaSetDevice(i); assert(cuerr == cudaSuccess);
    cuerr = cudaGetDeviceProperties(&(gpuProperty[i]),i); assert(cuerr == cudaSuccess);
    cuberr = cublasCreate(&(cublasHandle[i])); assert(cuberr == CUBLAS_STATUS_SUCCESS);
@@ -76,11 +76,11 @@ void init()
    std::cout << "Initialized GPU " << i << std::endl;
   }
   //Enable P2P access between GPU:
-  if(gpuAmount > 1){
-   for(int i = gpuAmount-1; i >= 0; --i){
+  if(totalNumGPUs > 1){
+   for(int i = (totalNumGPUs - 1); i >= 0; --i){
     if(gpuProperty[i].unifiedAddressing != 0){
      cuerr = cudaSetDevice(i); assert(cuerr == cudaSuccess);
-     for(int j = gpuAmount-1; j >= 0; --j){
+     for(int j = (totalNumGPUs - 1); j >= 0; --j){
       if(j != i){
        if(gpuProperty[j].unifiedAddressing != 0){
         cuerr = cudaDeviceEnablePeerAccess(j,0);
@@ -104,18 +104,18 @@ void init()
 
 void shutdown()
 {
- if(gpuAmount > 0){
+ if(totalNumGPUs > 0){
   cudaError_t cuerr;
   cublasStatus_t cuberr;
-  for(int i = 0; i < gpuAmount; ++i){
+  for(int i = 0; i < totalNumGPUs; ++i){
    cuberr = cublasDestroy(cublasHandle[i]); assert(cuberr == CUBLAS_STATUS_SUCCESS);
    cuerr = cudaDeviceReset(); assert(cuerr == cudaSuccess);
-   std::cout << "Destroyed primary context for GPU " << i << std::endl;
+   std::cout << "Destroyed primary context on GPU " << i << std::endl;
   }
   delete [] cublasHandle;
   delete [] gpuProperty;
  }
- gpuAmount=0;
+ totalNumGPUs = 0;
  std::cout << "BLA library shut down successfully" << std::endl;
  return;
 }
@@ -172,9 +172,9 @@ void test_norm()
  float * arr1 = static_cast<float*>(allocate(dsize,0,MemKind::Regular));
  float * dnorm2 = static_cast<float*>(allocate(sizeof(float),0,MemKind::Regular));
 
- for(size_t i = 0; i < vol; ++i) arr0[i]=1.0/sqrt((float)vol); //value of each element to make norm equal 1
+ for(size_t i = 0; i < vol; ++i) arr0[i]=1.0/sqrt((double)vol); //value of each element to make norm equal 1
 
- cudaError_t cuerr = cudaMemcpy((void*)arr1,(void*)arr0,dsize,cudaMemcpyDefault);
+ cudaError_t cuerr = cudaMemcpy((void*)arr1,(void*)arr0,dsize,cudaMemcpyDefault); assert(cuerr == cudaSuccess);
 
  unsigned int numBlocks = 1024; unsigned int numThreads = 256;
  gpu_array_norm<<<numBlocks,numThreads,numThreads*sizeof(float)>>>(vol,arr1,dnorm2);
@@ -183,7 +183,7 @@ void test_norm()
 
  float norm2 = 0.0f;
  cuerr = cudaMemcpy((void*)(&norm2),(void*)dnorm2,sizeof(float),cudaMemcpyDefault);
- std::cout << "Norm2 = " << norm2 << std::endl;
+ std::cout << "Norm2 = " << norm2 << " (correct value is 1.0)" << std::endl;
  assert(abs(norm2-1.0f) < num_tolerance);
 
  deallocate((void*)dnorm2);
@@ -204,7 +204,10 @@ void test_bla()
 __global__ void gpu_test_presence(size_t str_len, char * __restrict__ dst, const char * __restrict__ src)
 {
  int tid = blockIdx.x * blockDim.x + threadIdx.x;
- if(tid < str_len) dst[tid] = src[tid];
+ while(tid < str_len){
+  dst[tid] = src[tid];
+  tid += gridDim.x * blockDim.x;
+ }
  return;
 }
 
@@ -214,9 +217,9 @@ __global__ void gpu_array_norm(size_t arr_size, const T * __restrict__ arr, vola
 {
  extern __shared__ T thread_norm[]; //blockDim.x
 
- size_t n = gridDim.x*blockDim.x;
+ size_t n = gridDim.x * blockDim.x;
  T tnorm = static_cast<T>(0);
- for(size_t i = blockIdx.x*blockDim.x + threadIdx.x; i < arr_size; i += n) tnorm += arr[i] * arr[i];
+ for(size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < arr_size; i += n) tnorm += arr[i] * arr[i];
  thread_norm[threadIdx.x] = tnorm;
  __syncthreads();
 
@@ -225,7 +228,7 @@ __global__ void gpu_array_norm(size_t arr_size, const T * __restrict__ arr, vola
   unsigned int j = (s+1U)>>1; //=(s+1)/2
   if(threadIdx.x + j < s) thread_norm[threadIdx.x] += thread_norm[threadIdx.x+j];
   __syncthreads();
-  s=j;
+  s = j;
  }
 
  if(threadIdx.x == 0){
@@ -245,7 +248,7 @@ template <typename T>
 __global__ void gpu_array_add(size_t arr_size, T * __restrict__ arr0, const T * __restrict__ arr1)
 {
  size_t n = gridDim.x * blockDim.x;
- for(size_t i = blockIdx.x*blockDim.x + threadIdx.x; i < arr_size; i += n) arr0[i] += arr1[i];
+ for(size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < arr_size; i += n) arr0[i] += arr1[i];
  return;
 }
 

@@ -18,12 +18,9 @@
 !You should have received a copy of the GNU Lesser General Public License
 !along with CUDA BLA. If not, see <http://www.gnu.org/licenses/>. */
 
-#include <stdio.h>
-#include <iostream>
-#include <string>
-#include <algorithm>
-
 #include "bla_lib.hpp"
+
+#include <iostream>
 
 void use_bla()
 {
@@ -32,21 +29,21 @@ void use_bla()
  bla::Matrix<float> A(1000,2000);
  //Allocate matrix A body on Host:
  A.allocateBody(-1,bla::MemKind::Pinned);
- //Set matrix A body to some value:
+ //Set matrix A body to some non-trivial value on Host:
  A.setBodyHost();
 
  //Create matrix B:
  bla::Matrix<float> B(2000,3000);
  //Allocate matrix B body on Host:
  B.allocateBody(-1,bla::MemKind::Pinned);
- //Set matrix B body to some value:
+ //Set matrix B body to some non-trivial value on Host:
  B.setBodyHost();
 
  //Create matrix C:
  bla::Matrix<float> C(1000,3000);
  //Allocate matrix C body on GPU#0:
  C.allocateBody(0,bla::MemKind::Regular);
- //Set matrix C body to zero:
+ //Set matrix C body to zero on GPU#0:
  C.zeroBody(0);
 
  std::cout << "Seems like it works!" << std::endl;
@@ -57,16 +54,16 @@ void use_bla()
 int main(int argc, char ** argv)
 {
 
-//Init the BLA library:
+//Initialize BLA library:
  bla::init();
 
-//Test the BLA library:
+//Test BLA library:
  bla::test_bla();
 
-//Use the BLA library:
+//Use BLA library:
  use_bla();
 
-//Shutdown the BLA library:
+//Shutdown BLA library:
  bla::shutdown();
 
  return 0;

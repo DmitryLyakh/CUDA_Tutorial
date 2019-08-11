@@ -33,13 +33,15 @@ enum class MemKind{
  Unified  //unified memory (regardless)
 };
 
-//Allocates memory on any device (Host: -1; Device: >=0):
+/** Allocates memory on any device (Host: -1; Device: >=0):
+    Host (CPU): id = -1;
+    GPU device: id >= 0. **/
 void * allocate(size_t size,                          //in: requested memory size in bytes
                 int device = -1,                      //in: device (-1: Host; >=0: corresponding GPU)
-                MemKind mem_kind = MemKind::Regular); //in: requested memory kind
+                MemKind mem_kind = MemKind::Regular); //in: requested memory kind (see above)
 
-//Deallocates previously allocated memory on any device:
-void deallocate(void * ptr); //in: pointer to previously allocated memory
+/** Deallocates previously allocated memory on any device. **/
+void deallocate(void * ptr); //in: pointer to the previously allocated memory chunk
 
 } //namespace bla
 
