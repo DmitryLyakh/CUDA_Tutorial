@@ -70,6 +70,13 @@ public:
      By default the source device is Host (if up to date). **/
  void syncBody(int device, int source_device = -1);
 
+ /** Computes the norm of the matrix on a given device **/
+ double computeNorm(int device = -1);
+ /** Performs matrix addition on a given device **/
+ void add(Matrix & Amat, int device = -1);
+ /** Performs matrix multiplication on a given device **/
+ void multiplyAdd(Matrix & Amat, Matrix & Bmat, int device = -1);
+
 private:
 
  //Memory resource descriptor:
@@ -258,6 +265,30 @@ void Matrix<T>::syncBody(int device, int source_device)
    assert(false);
   }
  }
+ return;
+}
+
+
+template <typename T>
+double Matrix<T>::computeNorm(int device)
+{
+ //`Finish
+ return 0.0;
+}
+
+
+template <typename T>
+void Matrix<T>::add(Matrix & Amat, int device)
+{
+ //`Finish
+ return;
+}
+
+
+template <typename T>
+void Matrix<T>::multiplyAdd(Matrix & Amat, Matrix & Bmat, int device)
+{
+ //`Finish
  return;
 }
 

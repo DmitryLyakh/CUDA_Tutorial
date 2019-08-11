@@ -258,6 +258,12 @@ __global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T 
 {
  __shared__ T lbuf[TILE_EXT_X][TILE_EXT_Y],rbuf[TILE_EXT_X][TILE_EXT_Y];
 
+ //Load a tile of the left matrix into shared memory:
+
+ //Load a tile of the right matrix into shared memory:
+
+ //Multiply tiles and store the result in global memory:
+
  return;
 }
 
