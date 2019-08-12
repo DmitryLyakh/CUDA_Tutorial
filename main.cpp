@@ -18,7 +18,7 @@
 !You should have received a copy of the GNU Lesser General Public License
 !along with CUDA BLA. If not, see <http://www.gnu.org/licenses/>. */
 
-#include "bla_lib.hpp"
+#include "bla.hpp"
 
 #include <iostream>
 

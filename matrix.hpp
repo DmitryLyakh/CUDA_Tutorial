@@ -21,12 +21,7 @@
 #ifndef MATRIX_HPP_
 #define MATRIX_HPP_
 
-#include "memory.hpp"
-#include "timer.hpp"
-
-//#include <cuda.h>
-#include <cuda_runtime.h>
-#include <cublas_v2.h>
+#include "bla_lib.hpp"
 
 #include <iostream>
 #include <cassert>
@@ -75,7 +70,7 @@ public:
  /** Performs matrix addition on a given device **/
  void add(Matrix & Amat, int device = -1);
  /** Performs matrix multiplication on a given device **/
- void multiplyAdd(Matrix & Amat, Matrix & Bmat, int device = -1);
+ void multiplyAdd(bool left_transp, bool right_transp, Matrix & Amat, Matrix & Bmat, int device = -1);
 
 private:
 
@@ -272,23 +267,72 @@ void Matrix<T>::syncBody(int device, int source_device)
 template <typename T>
 double Matrix<T>::computeNorm(int device)
 {
- //`Finish
- return 0.0;
+ std::size_t vol = this->getSize();
+ T * matrix_body = this->getBodyPtr(device); assert(matrix_body != nullptr);
+ double result = 0.0;
+ if(device >= 0){ //GPU
+  int dev; cudaError_t cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
+  if(device != dev){
+   cuerr = cudaSetDevice(device); assert(cuerr == cudaSuccess);
+  }
+  result = matrix_norm2_gpu(vol,matrix_body);
+  if(device != dev){
+   cuerr = cudaSetDevice(dev); assert(cuerr == cudaSuccess);
+  }
+ }else{ //Host
+  //`Implement
+  assert(false);
+ }
+ return result;
 }
 
 
 template <typename T>
 void Matrix<T>::add(Matrix & Amat, int device)
 {
- //`Finish
+ std::size_t vol = this->getSize();
+ assert(Amat.getSize() == vol);
+ T * matrix0_body = this->getBodyPtr(device); assert(matrix0_body != nullptr);
+ const T * matrix1_body = Amat.getBodyPtr(device); assert(matrix1_body != nullptr);
+ if(device >= 0){ //GPU
+  int dev; cudaError_t cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
+  if(device != dev){
+   cuerr = cudaSetDevice(device); assert(cuerr == cudaSuccess);
+  }
+  matrix_addition_gpu(vol,matrix0_body,matrix1_body);
+  if(device != dev){
+   cuerr = cudaSetDevice(dev); assert(cuerr == cudaSuccess);
+  }
+ }else{ //Host
+  //`Implement
+  assert(false);
+ }
  return;
 }
 
 
 template <typename T>
-void Matrix<T>::multiplyAdd(Matrix & Amat, Matrix & Bmat, int device)
+void Matrix<T>::multiplyAdd(bool left_transp, bool right_transp, Matrix & Amat, Matrix & Bmat, int device)
 {
- //`Finish
+ T * matrix0_body = this->getBodyPtr(device); assert(matrix0_body != nullptr);
+ const T * matrix1_body = Amat.getBodyPtr(device); assert(matrix1_body != nullptr);
+ const T * matrix2_body = Bmat.getBodyPtr(device); assert(matrix2_body != nullptr);
+ if(device >= 0){ //GPU
+  int dev; cudaError_t cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
+  if(device != dev){
+   cuerr = cudaSetDevice(device); assert(cuerr == cudaSuccess);
+  }
+  matrix_multiplication_gpu(left_transp,right_transp,
+                            matrix0_body,this->getNumRows(),this->getNumCols(),
+                            matrix1_body,Amat.getNumRows(),Amat.getNumCols(),
+                            matrix2_body,Bmat.getNumRows(),Bmat.getNumCols());
+  if(device != dev){
+   cuerr = cudaSetDevice(dev); assert(cuerr == cudaSuccess);
+  }
+ }else{ //Host
+  //`Implement
+  assert(false);
+ }
  return;
 }
 

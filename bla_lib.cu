@@ -28,8 +28,30 @@
 
 namespace bla{
 
+//CUDA floating point data type selector:
+template <typename T> struct CudaFPData{};
+template <> struct CudaFPData<float>{
+ using type = float;
+ const cudaDataType_t kind = CUDA_R_32F;
+};
+template <> struct CudaFPData<double>{
+ using type = double;
+ const cudaDataType_t kind = CUDA_R_64F;
+};
+template <> struct CudaFPData<std::complex<float>>{
+ using type = cuComplex;
+ const cudaDataType_t kind = CUDA_C_32F;
+};
+template <> struct CudaFPData<std::complex<double>>{
+ using type = cuDoubleComplex;
+ const cudaDataType_t kind = CUDA_C_64F;
+};
+
 //Number of present GPU devices:
 static int totalNumGPUs = 0;
+
+//Current GEMM algorithm:
+static int gemmAlgorithm = 0;
 
 //CUDA device properties (for all GPU devices):
 cudaDeviceProp * gpuProperty;
@@ -37,24 +59,233 @@ cudaDeviceProp * gpuProperty;
 //cuBLAS handles (one per device):
 cublasHandle_t * cublasHandle;
 
+//Internal tests:
+bool test_hello();
+bool test_norm();
+
 //CUDA kernel prototypes:
 __global__ void gpu_test_presence(size_t str_len, char * __restrict__ dst, const char * __restrict__ src);
 
 template <typename T>
-__global__ void gpu_array_norm(size_t arr_size, const T * __restrict__ arr, volatile T * norm);
+__global__ void gpu_array_norm2(size_t arr_size, const T * __restrict__ arr, volatile T * norm);
 __device__ static unsigned int norm_wr_lock = 0; //reduction lock (per GPU)
 
 template <typename T>
 __global__ void gpu_array_add(size_t arr_size, T * __restrict__ arr0, const T * __restrict__ arr1);
 
+const int TILE_EXT_X = 16;
+const int TILE_EXT_Y = 16;
 template <typename T>
 __global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
-static const int TILE_EXT_X = 16;
-static const int TILE_EXT_Y = 16;
+template <typename T>
+__global__ void gpu_gemm_tn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
+template <typename T>
+__global__ void gpu_gemm_nt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
+template <typename T>
+__global__ void gpu_gemm_tt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
 
-//Internal tests:
-void test_hello();
-void test_norm();
+//Dispatch wrappers:
+template <typename T>
+T matrix_norm2_gpu_(size_t num_elems, const T * matrix_body);
+
+template <typename T>
+void matrix_addition_gpu_(size_t num_elems, T * matrix0_body, const T * matrix1_body);
+
+template <typename T>
+void matrix_multiplication_gpu_(bool left_transp, bool right_transp,
+                                T * matrix0_body, int nrows0, int ncols0,
+                                const T * matrix1_body, int nrows1, int ncols1,
+                                const T * matrix2_body, int nrows2, int ncols2);
+
+
+//IMPLEMENTATION:
+__global__ void gpu_test_presence(size_t str_len, char * __restrict__ dst, const char * __restrict__ src)
+{
+ int tid = blockIdx.x * blockDim.x + threadIdx.x;
+ while(tid < str_len){
+  dst[tid] = src[tid];
+  tid += gridDim.x * blockDim.x;
+ }
+ return;
+}
+
+
+template <typename T>
+__global__ void gpu_array_norm2(size_t arr_size, const T * __restrict__ arr, volatile T * norm)
+{
+ extern __shared__ double thread_norm[]; //blockDim.x
+
+ size_t n = gridDim.x * blockDim.x;
+ double tnorm = 0.0;
+ for(size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < arr_size; i += n) tnorm += arr[i] * arr[i];
+ thread_norm[threadIdx.x] = tnorm;
+ __syncthreads();
+
+ unsigned int s = blockDim.x;
+ while(s > 1){
+  unsigned int j = (s+1U)>>1; //=(s+1)/2
+  if(threadIdx.x + j < s) thread_norm[threadIdx.x] += thread_norm[threadIdx.x+j];
+  __syncthreads();
+  s = j;
+ }
+
+ if(threadIdx.x == 0){
+  unsigned int j = 1;
+  while(j){j = atomicMax(&norm_wr_lock,1);} //lock
+  __threadfence();
+  *norm += thread_norm[0]; //accumulate
+  __threadfence();
+  j=atomicExch(&norm_wr_lock,0); //unlock
+ }
+ __syncthreads();
+ return;
+}
+
+
+template <typename T>
+__global__ void gpu_array_add(size_t arr_size, T * __restrict__ arr0, const T * __restrict__ arr1)
+{
+ size_t n = gridDim.x * blockDim.x;
+ for(size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < arr_size; i += n) arr0[i] += arr1[i];
+ return;
+}
+
+
+template <typename T>
+__global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+{
+ __shared__ T lbuf[TILE_EXT_X][TILE_EXT_Y],rbuf[TILE_EXT_X][TILE_EXT_Y];
+
+ //Load a tile of the left matrix into shared memory:
+
+ //Load a tile of the right matrix into shared memory:
+
+ //Multiply tiles and store the result in global memory:
+
+ return;
+}
+
+
+template <typename T>
+__global__ void gpu_gemm_tn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+{
+ //`Finish
+ return;
+}
+
+
+template <typename T>
+__global__ void gpu_gemm_nt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+{
+ //`Finish
+ return;
+}
+
+
+template <typename T>
+__global__ void gpu_gemm_tt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+{
+ //`Finish
+ return;
+}
+
+
+template <typename T>
+T matrix_norm2_gpu_(size_t num_elems, const T * matrix_body)
+{
+ T norm2 = static_cast<T>(0);
+ int dev; cudaError_t cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
+ T * dnorm2 = static_cast<T*>(allocate(sizeof(T),dev,MemKind::Regular));
+ unsigned int num_blocks = 1024; unsigned int num_threads = 256;
+ gpu_array_norm2<<<num_blocks,num_threads,num_threads*sizeof(double)>>>(num_elems,matrix_body,dnorm2);
+ cuerr = cudaDeviceSynchronize();
+ cuerr = cudaGetLastError(); assert(cuerr == cudaSuccess);
+ cuerr = cudaMemcpy((void*)(&norm2),(void*)dnorm2,sizeof(T),cudaMemcpyDefault);
+ deallocate((void*)dnorm2);
+ return norm2;
+}
+
+
+template <typename T>
+void matrix_addition_gpu_(size_t num_elems, T * matrix0_body, const T * matrix1_body)
+{
+ unsigned int num_blocks = 1024; unsigned int num_threads = 256;
+ gpu_array_add<<<num_blocks,num_threads>>>(num_elems,matrix0_body,matrix1_body);
+ cudaError_t cuerr = cudaDeviceSynchronize();
+ cuerr = cudaGetLastError(); assert(cuerr == cudaSuccess);
+ return;
+}
+
+
+template <typename T>
+void matrix_multiplication_gpu_(bool left_transp, bool right_transp,
+                               T * matrix0_body, int nrows0, int ncols0,
+                               const T * matrix1_body, int nrows1, int ncols1,
+                               const T * matrix2_body, int nrows2, int ncols2)
+{
+ dim3 blocks(64,64); dim3 threads(16,16);
+ if(!left_transp && !right_transp){
+  int m = nrows0, n = ncols0, k = ncols1;
+  gpu_gemm_nn<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+ }else if(left_transp && !right_transp){
+  int m = nrows0, n = ncols0, k = nrows1;
+  gpu_gemm_tn<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+ }else if(!left_transp && right_transp){
+  int m = nrows0, n = ncols0, k = ncols1;
+  gpu_gemm_nt<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+ }else if(left_transp && right_transp){
+  int m = nrows0, n = ncols0, k = nrows1;
+  gpu_gemm_tt<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+ }
+ cudaError_t cuerr = cudaDeviceSynchronize();
+ cuerr = cudaGetLastError(); assert(cuerr == cudaSuccess);
+ return;
+}
+
+
+float matrix_norm2_gpu(size_t num_elems, const float * matrix_body)
+{
+ return matrix_norm2_gpu_(num_elems,matrix_body);
+}
+
+double matrix_norm2_gpu(size_t num_elems, const double * matrix_body)
+{
+ return matrix_norm2_gpu_(num_elems,matrix_body);
+}
+
+
+void matrix_addition_gpu(size_t num_elems, float * matrix0_body, const float * matrix1_body)
+{
+ return matrix_addition_gpu_(num_elems,matrix0_body,matrix1_body);
+}
+
+void matrix_addition_gpu(size_t num_elems, double * matrix0_body, const double * matrix1_body)
+{
+ return matrix_addition_gpu_(num_elems,matrix0_body,matrix1_body);
+}
+
+
+void matrix_multiplication_gpu(bool left_transp, bool right_transp,
+                               float * matrix0_body, int nrows0, int ncols0,
+                               const float * matrix1_body, int nrows1, int ncols1,
+                               const float * matrix2_body, int nrows2, int ncols2)
+{
+ return matrix_multiplication_gpu_(left_transp,right_transp,
+                                   matrix0_body,nrows0,ncols0,
+                                   matrix1_body,nrows1,ncols1,
+                                   matrix2_body,nrows2,ncols2);
+}
+
+void matrix_multiplication_gpu(bool left_transp, bool right_transp,
+                               double * matrix0_body, int nrows0, int ncols0,
+                               const double * matrix1_body, int nrows1, int ncols1,
+                               const double * matrix2_body, int nrows2, int ncols2)
+{
+ return matrix_multiplication_gpu_(left_transp,right_transp,
+                                   matrix0_body,nrows0,ncols0,
+                                   matrix1_body,nrows1,ncols1,
+                                   matrix2_body,nrows2,ncols2);
+}
 
 
 void init()
@@ -121,7 +352,7 @@ void shutdown()
 }
 
 
-void test_hello()
+bool test_hello()
 {
  std::cout << "Testing presence on GPU ..." << std::endl;
  const std::string s1("Am I really on GPU?");
@@ -158,11 +389,11 @@ void test_hello()
  deallocate((void*)ds1);
  deallocate((void*)hs1);
 
- return;
+ return true;
 }
 
 
-void test_norm()
+bool test_norm()
 {
  std::cout << "Testing norm2 on GPU 0 ... ";
  const float num_tolerance = 1e-5;
@@ -172,12 +403,12 @@ void test_norm()
  float * arr1 = static_cast<float*>(allocate(dsize,0,MemKind::Regular));
  float * dnorm2 = static_cast<float*>(allocate(sizeof(float),0,MemKind::Regular));
 
- for(size_t i = 0; i < vol; ++i) arr0[i]=1.0/sqrt((double)vol); //value of each element to make norm equal 1
+ for(size_t i = 0; i < vol; ++i) arr0[i]=1.0f/sqrt((float)vol); //value of each element to make norm equal 1
 
  cudaError_t cuerr = cudaMemcpy((void*)arr1,(void*)arr0,dsize,cudaMemcpyDefault); assert(cuerr == cudaSuccess);
 
- unsigned int numBlocks = 1024; unsigned int numThreads = 256;
- gpu_array_norm<<<numBlocks,numThreads,numThreads*sizeof(float)>>>(vol,arr1,dnorm2);
+ unsigned int num_blocks = 1024; unsigned int num_threads = 256;
+ gpu_array_norm2<<<num_blocks,num_threads,num_threads*sizeof(double)>>>(vol,arr1,dnorm2);
  cuerr = cudaDeviceSynchronize();
  cuerr = cudaGetLastError(); assert(cuerr == cudaSuccess);
 
@@ -189,82 +420,15 @@ void test_norm()
  deallocate((void*)dnorm2);
  deallocate((void*)arr1);
  deallocate((void*)arr0);
- return;
+ return true;
 }
 
 
-void test_bla()
+bool test_bla()
 {
- test_hello();
- test_norm();
- return;
-}
-
-
-__global__ void gpu_test_presence(size_t str_len, char * __restrict__ dst, const char * __restrict__ src)
-{
- int tid = blockIdx.x * blockDim.x + threadIdx.x;
- while(tid < str_len){
-  dst[tid] = src[tid];
-  tid += gridDim.x * blockDim.x;
- }
- return;
-}
-
-
-template <typename T>
-__global__ void gpu_array_norm(size_t arr_size, const T * __restrict__ arr, volatile T * norm)
-{
- extern __shared__ T thread_norm[]; //blockDim.x
-
- size_t n = gridDim.x * blockDim.x;
- T tnorm = static_cast<T>(0);
- for(size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < arr_size; i += n) tnorm += arr[i] * arr[i];
- thread_norm[threadIdx.x] = tnorm;
- __syncthreads();
-
- unsigned int s = blockDim.x;
- while(s > 1){
-  unsigned int j = (s+1U)>>1; //=(s+1)/2
-  if(threadIdx.x + j < s) thread_norm[threadIdx.x] += thread_norm[threadIdx.x+j];
-  __syncthreads();
-  s = j;
- }
-
- if(threadIdx.x == 0){
-  unsigned int j = 1;
-  while(j){j = atomicMax(&norm_wr_lock,1);} //lock
-  __threadfence();
-  *norm += thread_norm[0]; //accumulate
-  __threadfence();
-  j=atomicExch(&norm_wr_lock,0); //unlock
- }
- __syncthreads();
- return;
-}
-
-
-template <typename T>
-__global__ void gpu_array_add(size_t arr_size, T * __restrict__ arr0, const T * __restrict__ arr1)
-{
- size_t n = gridDim.x * blockDim.x;
- for(size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < arr_size; i += n) arr0[i] += arr1[i];
- return;
-}
-
-
-template <typename T>
-__global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
-{
- __shared__ T lbuf[TILE_EXT_X][TILE_EXT_Y],rbuf[TILE_EXT_X][TILE_EXT_Y];
-
- //Load a tile of the left matrix into shared memory:
-
- //Load a tile of the right matrix into shared memory:
-
- //Multiply tiles and store the result in global memory:
-
- return;
+ if(!test_hello()) return false;
+ if(!test_norm()) return false;
+ return true;
 }
 
 } //namespace bla

@@ -21,13 +21,15 @@
 #ifndef BLA_LIB_HPP_
 #define BLA_LIB_HPP_
 
-#include "matrix.hpp"
 #include "memory.hpp"
 #include "timer.hpp"
 
-//#include <cuda.h>
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
+
+#include <cassert>
+
+#include <complex>
 
 namespace bla{
 
@@ -38,7 +40,25 @@ void init();
 void shutdown();
 
 /** Testing BLA **/
-void test_bla();
+bool test_bla();
+
+/** Matrix squared "norm" (sum of the squared elements) **/
+float matrix_norm2_gpu(size_t num_elems, const float * matrix_body);
+double matrix_norm2_gpu(size_t num_elems, const double * matrix_body);
+
+/** Matrix addition **/
+void matrix_addition_gpu(size_t num_elems, float * matrix0_body, const float * matrix1_body);
+void matrix_addition_gpu(size_t num_elems, double * matrix0_body, const double * matrix1_body);
+
+/** Matrix multiplication **/
+void matrix_multiplication_gpu(bool left_transp, bool right_transp,
+                               float * matrix0_body, int nrows0, int ncols0,
+                               const float * matrix1_body, int nrows1, int ncols1,
+                               const float * matrix2_body, int nrows2, int ncols2);
+void matrix_multiplication_gpu(bool left_transp, bool right_transp,
+                               double * matrix0_body, int nrows0, int ncols0,
+                               const double * matrix1_body, int nrows1, int ncols1,
+                               const double * matrix2_body, int nrows2, int ncols2);
 
 } //namespace bla
 
