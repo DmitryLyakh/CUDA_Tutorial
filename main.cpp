@@ -61,7 +61,8 @@ void use_bla()
  double tms = bla::time_sys_sec();
  C.multiplyAdd(false,false,A,B,0);
  double tmf = bla::time_sys_sec();
- std::cout << "Done: Time = " << tmf-tms << " s" << std::endl;
+ double flops = 2.0*std::sqrt(static_cast<double>(A.getVolume()) * static_cast<double>(B.getVolume()) * static_cast<double>(C.getVolume()));
+ std::cout << "Done: Time = " << tmf-tms << " s: Gflop/s = " << flops/(tmf-tms)/1e9 << std::endl;
 
  //Compute C norm on GPU#0:
  auto normC = C.computeNorm(0);
