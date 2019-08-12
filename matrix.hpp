@@ -23,7 +23,10 @@
 
 #include "bla_lib.hpp"
 
+#include <cuda_runtime.h>
+
 #include <iostream>
+#include <cstring>
 #include <cassert>
 #include <list>
 #include <type_traits>
@@ -188,7 +191,7 @@ void Matrix<T>::zeroBody(int device)
   std::size_t mat_size = this->getSize();
   assert(mat_size > 0);
   if(device < 0){ //Host
-   memset(((void*)mat),0,mat_size);
+   std::memset(((void*)mat),0,mat_size);
   }else{ //GPU device
    int dev;
    cudaError_t cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);

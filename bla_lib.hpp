@@ -24,9 +24,6 @@
 #include "memory.hpp"
 #include "timer.hpp"
 
-#include <cuda_runtime.h>
-#include <cublas_v2.h>
-
 #include <cassert>
 
 #include <complex>

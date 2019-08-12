@@ -20,6 +20,9 @@
 
 #include "bla_lib.hpp"
 
+#include <cuda_runtime.h>
+#include <cublas_v2.h>
+
 #include <cstdio>
 #include <cassert>
 #include <cmath>
@@ -28,24 +31,32 @@
 
 namespace bla{
 
+//GPU device constants:
+__device__ __constant__ static float zero_fp32 = 0.0f;
+__device__ __constant__ static float unity_fp32 = 1.0f;
+__device__ __constant__ static double zero_fp64 = 0.0;
+__device__ __constant__ static double unity_fp64 = 1.0;
+
+
 //CUDA floating point data type selector:
 template <typename T> struct CudaFPData{};
 template <> struct CudaFPData<float>{
  using type = float;
- const cudaDataType_t kind = CUDA_R_32F;
+ static constexpr cudaDataType_t kind = CUDA_R_32F;
 };
 template <> struct CudaFPData<double>{
  using type = double;
- const cudaDataType_t kind = CUDA_R_64F;
+ static constexpr cudaDataType_t kind = CUDA_R_64F;
 };
 template <> struct CudaFPData<std::complex<float>>{
  using type = cuComplex;
- const cudaDataType_t kind = CUDA_C_32F;
+ static constexpr cudaDataType_t kind = CUDA_C_32F;
 };
 template <> struct CudaFPData<std::complex<double>>{
  using type = cuDoubleComplex;
- const cudaDataType_t kind = CUDA_C_64F;
+ static constexpr cudaDataType_t kind = CUDA_C_64F;
 };
+
 
 //Number of present GPU devices:
 static int totalNumGPUs = 0;
@@ -59,9 +70,11 @@ cudaDeviceProp * gpuProperty;
 //cuBLAS handles (one per device):
 cublasHandle_t * cublasHandle;
 
+
 //Internal tests:
 bool test_hello();
 bool test_norm();
+
 
 //CUDA kernel prototypes:
 __global__ void gpu_test_presence(size_t str_len, char * __restrict__ dst, const char * __restrict__ src);
@@ -83,6 +96,7 @@ template <typename T>
 __global__ void gpu_gemm_nt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
 template <typename T>
 __global__ void gpu_gemm_tt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
+
 
 //Dispatch wrappers:
 template <typename T>
@@ -223,22 +237,52 @@ void matrix_multiplication_gpu_(bool left_transp, bool right_transp,
                                const T * matrix1_body, int nrows1, int ncols1,
                                const T * matrix2_body, int nrows2, int ncols2)
 {
- dim3 blocks(64,64); dim3 threads(16,16);
- if(!left_transp && !right_transp){
+ if(gemmAlgorithm == 0){ //BLA GEMM
+  dim3 blocks(64,64); dim3 threads(16,16);
+  if(!left_transp && !right_transp){
+   int m = nrows0, n = ncols0, k = ncols1;
+   gpu_gemm_nn<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+  }else if(left_transp && !right_transp){
+   int m = nrows0, n = ncols0, k = nrows1;
+   gpu_gemm_tn<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+  }else if(!left_transp && right_transp){
+   int m = nrows0, n = ncols0, k = ncols1;
+   gpu_gemm_nt<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+  }else if(left_transp && right_transp){
+   int m = nrows0, n = ncols0, k = nrows1;
+   gpu_gemm_tt<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+  }
+  cudaError_t cuerr = cudaDeviceSynchronize();
+  cuerr = cudaGetLastError(); assert(cuerr == cudaSuccess);
+ }else{ //cuBLAS GEMM
+  int dev; cudaError_t cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
+  cublasOperation_t transa = CUBLAS_OP_N; if(left_transp) transa = CUBLAS_OP_T;
+  cublasOperation_t transb = CUBLAS_OP_N; if(right_transp) transb = CUBLAS_OP_T;
   int m = nrows0, n = ncols0, k = ncols1;
-  gpu_gemm_nn<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
- }else if(left_transp && !right_transp){
-  int m = nrows0, n = ncols0, k = nrows1;
-  gpu_gemm_tn<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
- }else if(!left_transp && right_transp){
-  int m = nrows0, n = ncols0, k = ncols1;
-  gpu_gemm_nt<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
- }else if(left_transp && right_transp){
-  int m = nrows0, n = ncols0, k = nrows1;
-  gpu_gemm_tt<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+  if(left_transp) k = nrows1;
+  void *alpha, *beta;
+  if(CudaFPData<T>::kind == CUDA_R_32F){
+   cuerr = cudaGetSymbolAddress(&alpha,unity_fp32); assert(cuerr == cudaSuccess);
+   cuerr = cudaGetSymbolAddress(&beta,unity_fp32); assert(cuerr == cudaSuccess);
+  }else if(CudaFPData<T>::kind == CUDA_R_64F){
+   cuerr = cudaGetSymbolAddress(&alpha,unity_fp64); assert(cuerr == cudaSuccess);
+   cuerr = cudaGetSymbolAddress(&beta,unity_fp64); assert(cuerr == cudaSuccess);
+  }else{
+   assert(false);
+  }
+  cublasStatus_t custat = cublasGemmEx(cublasHandle[dev],
+                                       transa,transb,
+                                       m,n,k,
+                                       alpha,
+                                       matrix1_body,CudaFPData<T>::kind,nrows1,
+                                       matrix2_body,CudaFPData<T>::kind,nrows2,
+                                       beta,
+                                       matrix0_body,CudaFPData<T>::kind,nrows0,
+                                       CudaFPData<T>::kind, CUBLAS_GEMM_DEFAULT);
+  assert(custat == CUBLAS_STATUS_SUCCESS);
+  cuerr = cudaDeviceSynchronize();
+  cuerr = cudaGetLastError(); assert(cuerr == cudaSuccess);
  }
- cudaError_t cuerr = cudaDeviceSynchronize();
- cuerr = cudaGetLastError(); assert(cuerr == cudaSuccess);
  return;
 }
 
