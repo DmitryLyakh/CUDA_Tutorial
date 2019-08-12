@@ -50,6 +50,8 @@ public:
  int getNumRows() const;
  /** Returns the number of columns in the matrix **/
  int getNumCols() const;
+ /** Returns the volume of the matrix (number of elements) **/
+ std::size_t getVolume() const;
  /** Returns the size of the matrix in bytes **/
  std::size_t getSize() const;
  /** Returns a pointer to the memory resource on requested device (if any) **/
@@ -123,6 +125,13 @@ template <typename T>
 int Matrix<T>::getNumCols() const
 {
  return ncols_;
+}
+
+
+template <typename T>
+std::size_t Matrix<T>::getVolume() const
+{
+ return (static_cast<std::size_t>(nrows_)*static_cast<std::size_t>(ncols_)); //number of elements
 }
 
 
@@ -220,7 +229,7 @@ void Matrix<T>::setBodyHost()
   for(std::size_t j = 0; j < ncols_; ++j){
    std::size_t offset = j*nrows_;
    for(std::size_t i = 0; i < nrows_; ++i){
-    mat[offset+i] = static_cast<T>(1)/(static_cast<T>(i) + static_cast<T>(j)); //some value
+    mat[offset+i] = static_cast<T>(1)/(static_cast<T>(i) + static_cast<T>(j) + static_cast<T>(1)); //some value
    }
   }
   this->markBodyStatus(-1,true); //mark matrix body on Host as up-to-date
@@ -249,17 +258,22 @@ void Matrix<T>::syncBody(int device, int source_device)
     destination_found = true;
    }
   }
-  if(destination_found){
-   if(source_found){
-    cudaError_t cuerr = cudaMemcpy(destination_resource.ptr,source_resource.ptr,this->getSize(),cudaMemcpyDefault);
-    assert(cuerr == cudaSuccess);
-    this->markBodyStatus(device,true); //mark matrix body on device as up-to-date
-   }else{
-    std::cout << "#ERROR(BLA::Matrix::syncBody): Provided source device " << source_device << " has no up-to-date matrix body!" << std::endl;
-    assert(false);
+  if(!destination_found){
+   this->allocateBody(device,MemKind::Regular);
+   for(const auto & loc: location_){
+    if(loc.device == device){
+     destination_resource = loc;
+     destination_found = true;
+     break;
+    }
    }
+  }
+  if(source_found){
+   cudaError_t cuerr = cudaMemcpy(destination_resource.ptr,source_resource.ptr,this->getSize(),cudaMemcpyDefault);
+   assert(cuerr == cudaSuccess);
+   this->markBodyStatus(device,true); //mark matrix body on device as up-to-date
   }else{
-   std::cout << "#ERROR(BLA::Matrix::syncBody): Requested destination device " << device << " has no allocated resource!" << std::endl;
+   std::cout << "#ERROR(BLA::Matrix::syncBody): Provided source device " << source_device << " has no up-to-date matrix body!" << std::endl;
    assert(false);
   }
  }
@@ -270,7 +284,7 @@ void Matrix<T>::syncBody(int device, int source_device)
 template <typename T>
 double Matrix<T>::computeNorm(int device)
 {
- std::size_t vol = this->getSize();
+ std::size_t vol = this->getVolume();
  T * matrix_body = this->getBodyPtr(device); assert(matrix_body != nullptr);
  double result = 0.0;
  if(device >= 0){ //GPU
@@ -293,8 +307,8 @@ double Matrix<T>::computeNorm(int device)
 template <typename T>
 void Matrix<T>::add(Matrix & Amat, int device)
 {
- std::size_t vol = this->getSize();
- assert(Amat.getSize() == vol);
+ std::size_t vol = this->getVolume();
+ assert(Amat.getVolume() == vol);
  T * matrix0_body = this->getBodyPtr(device); assert(matrix0_body != nullptr);
  const T * matrix1_body = Amat.getBodyPtr(device); assert(matrix1_body != nullptr);
  if(device >= 0){ //GPU

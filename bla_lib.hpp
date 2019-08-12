@@ -39,6 +39,11 @@ void shutdown();
 /** Testing BLA **/
 bool test_bla();
 
+/** Resets GEMM algorithm:
+    0: Custom GEMM from BLA;
+    1: cuBLAS GEMM. **/
+void reset_gemm_algorithm(int algo);
+
 /** Matrix squared "norm" (sum of the squared elements) **/
 float matrix_norm2_gpu(size_t num_elems, const float * matrix_body);
 double matrix_norm2_gpu(size_t num_elems, const double * matrix_body);

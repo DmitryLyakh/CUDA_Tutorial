@@ -46,6 +46,27 @@ void use_bla()
  //Set matrix C body to zero on GPU#0:
  C.zeroBody(0);
 
+ //Copy matrix A to GPU#0 from Host:
+ A.syncBody(0,-1);
+ auto normA = A.computeNorm(0);
+ std::cout << "Matrix A norm = " << normA << std::endl;
+ //Copy matrix B to GPU#0 from Host:
+ B.syncBody(0,-1);
+ auto normB = B.computeNorm(0);
+ std::cout << "Matrix B norm = " << normB << std::endl;
+
+ //Perform matrix multiplication on GPU#0:
+ bla::reset_gemm_algorithm(1);
+ std::cout << "Performing matrix multiplication C+=A*B ... ";
+ double tms = bla::time_sys_sec();
+ C.multiplyAdd(false,false,A,B,0);
+ double tmf = bla::time_sys_sec();
+ std::cout << "Done: Time = " << tmf-tms << " s" << std::endl;
+
+ //Compute C norm on GPU#0:
+ auto normC = C.computeNorm(0);
+ std::cout << "Matrix C norm = " << normC << std::endl;
+
  std::cout << "Seems like it works!" << std::endl;
  return;
 }

@@ -210,6 +210,7 @@ T matrix_norm2_gpu_(size_t num_elems, const T * matrix_body)
  T norm2 = static_cast<T>(0);
  int dev; cudaError_t cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
  T * dnorm2 = static_cast<T*>(allocate(sizeof(T),dev,MemKind::Regular));
+ cuerr = cudaMemset((void*)dnorm2,0,sizeof(T)); assert(cuerr == cudaSuccess);
  unsigned int num_blocks = 1024; unsigned int num_threads = 256;
  gpu_array_norm2<<<num_blocks,num_threads,num_threads*sizeof(double)>>>(num_elems,matrix_body,dnorm2);
  cuerr = cudaDeviceSynchronize();
@@ -392,6 +393,13 @@ void shutdown()
  }
  totalNumGPUs = 0;
  std::cout << "BLA library shut down successfully" << std::endl;
+ return;
+}
+
+
+void reset_gemm_algorithm(int algo)
+{
+ gemmAlgorithm = algo;
  return;
 }
 
