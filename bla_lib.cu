@@ -168,14 +168,21 @@ __global__ void gpu_array_add(size_t arr_size, T * __restrict__ arr0, const T * 
 template <typename T>
 __global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
 {
- __shared__ T lbuf[TILE_EXT_X][TILE_EXT_Y],rbuf[TILE_EXT_X][TILE_EXT_Y];
-
- //Load a tile of the left matrix into shared memory:
-
- //Load a tile of the right matrix into shared memory:
-
- //Multiply tiles and store the result in global memory:
-
+ size_t ty = blockIdx.y*blockDim.y + threadIdx.y;
+ size_t tx = blockIdx.x*blockDim.x + threadIdx.x;
+ size_t n_pos = ty;
+ while(n_pos < n){
+  size_t m_pos = tx;
+  while(m_pos < m){
+   T tmp = static_cast<T>(0.0);
+   for(size_t k_pos = 0; k_pos < k; ++k_pos){
+    tmp += left[k_pos*m + m_pos] * right[n_pos*k + k_pos];
+   }
+   dest[n_pos*m + m_pos] += tmp;
+   m_pos += gridDim.x*blockDim.x;
+  }
+  n_pos += gridDim.y*blockDim.y;
+ }
  return;
 }
 
@@ -239,18 +246,21 @@ void matrix_multiplication_gpu_(bool left_transp, bool right_transp,
                                const T * matrix2_body, int nrows2, int ncols2)
 {
  if(gemmAlgorithm == 0){ //BLA GEMM
-  dim3 blocks(64,64); dim3 threads(16,16);
   if(!left_transp && !right_transp){
    int m = nrows0, n = ncols0, k = ncols1;
+   dim3 blocks((nrows0-1)/16+1,(ncols0-1)/16+1); dim3 threads(16,16);
    gpu_gemm_nn<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }else if(left_transp && !right_transp){
    int m = nrows0, n = ncols0, k = nrows1;
+   dim3 blocks((nrows0-1)/16+1,(ncols0-1)/16+1); dim3 threads(16,16);
    gpu_gemm_tn<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }else if(!left_transp && right_transp){
    int m = nrows0, n = ncols0, k = ncols1;
+   dim3 blocks((nrows0-1)/16+1,(ncols0-1)/16+1); dim3 threads(16,16);
    gpu_gemm_nt<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }else if(left_transp && right_transp){
    int m = nrows0, n = ncols0, k = nrows1;
+   dim3 blocks((nrows0-1)/16+1,(ncols0-1)/16+1); dim3 threads(16,16);
    gpu_gemm_tt<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }
   cudaError_t cuerr = cudaDeviceSynchronize();
