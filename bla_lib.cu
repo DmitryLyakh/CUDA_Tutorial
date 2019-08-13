@@ -94,6 +94,8 @@ __global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T 
 template <typename T>
 __global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
 template <typename T>
+__global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
+template <typename T>
 __global__ void gpu_gemm_tn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
 template <typename T>
 __global__ void gpu_gemm_nt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
@@ -200,6 +202,75 @@ __global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const
 {
  using int_t = int; //either int or size_t
  __shared__ T lbuf[TILE_EXT_K][TILE_EXT_M], rbuf[TILE_EXT_N][TILE_EXT_K];
+
+ const int_t by = blockDim.y;
+ const int_t bx = blockDim.x;
+ const int_t ly = threadIdx.y;
+ const int_t lx = threadIdx.x;
+ const int_t ty = blockIdx.y*blockDim.y + threadIdx.y; //blockDim.y = TILE_EXT_M
+ const int_t tx = blockIdx.x*blockDim.x + threadIdx.x; //blockDim.x = TILE_EXT_N
+
+ int_t n_pos = ty;
+ while(n_pos < n){ //n_pos is the position of the CUDA thread along the N dimension
+
+  int_t m_pos = tx;
+  while(m_pos < m){ //m_pos is the position of the CUDA thread along the M dimension
+
+   T tmp = static_cast<T>(0.0);
+   int_t k_pos = 0;
+   while(k_pos < k){ //k_pos is the position of the CUDA thread along the K dimension
+
+    //Load a tile of matrix A(m_pos:TILE_EXT_M, k_pos:TILE_EXT_K):
+    int_t k_end = k_pos + TILE_EXT_K; if(k_end > k) k_end = k;
+    int_t k_loc = k_pos + ly;
+    int_t k_incr = by; if(n_pos - ly + by > n) k_incr = n - (n_pos - ly);
+    while(k_loc < k_end){
+     lbuf[k_loc-k_pos][lx] = left[k_loc*m + m_pos];
+     k_loc += k_incr;
+    }
+
+    //Load a tile of matrix B(k_pos:TILE_EXT_K, n_pos:TILE_EXT_N):
+    k_loc = k_pos + lx;
+    k_incr = bx; if(m_pos - lx + bx > m) k_incr = m - (m_pos - lx);
+    while(k_loc < k_end){
+     rbuf[ly][k_loc-k_pos] = right[n_pos*k + k_loc];
+     k_loc += k_incr;
+    }
+    __syncthreads();
+
+    //Multiply two loaded tiles to produce a tile of matrix C(m_pos:TILE_EXT_M,n_pos:TILE_EXT_N):
+    if(k_end - k_pos == TILE_EXT_K){ //number of loop iterations is known at compile time: Unroll it
+#pragma unroll
+     for(int_t i = 0; i < TILE_EXT_K; ++i){
+      tmp += lbuf[i][lx] * rbuf[ly][i];
+     }
+    }else{ //number of loop iterations is not known at compile time
+     for(int_t i = 0; i < (k_end - k_pos); ++i){
+      tmp += lbuf[i][lx] * rbuf[ly][i];
+     }
+    }
+    __syncthreads();
+
+    k_pos += TILE_EXT_K;
+   }
+   //Save the computed element of matrix C:
+   dest[n_pos*m + m_pos] += tmp;
+
+   m_pos += gridDim.x*blockDim.x;
+  }
+
+  n_pos += gridDim.y*blockDim.y;
+ }
+ return;
+}
+
+
+template <typename T>
+__global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+{
+ using int_t = int; //either int or size_t
+ __shared__ T lbuf[TILE_EXT_K][TILE_EXT_M], rbuf[TILE_EXT_N][TILE_EXT_K], dbuf[TILE_EXT_N][TILE_EXT_M];
+ T lreg[2][8], rreg[2][4], dreg[4][8];
 
  const int_t by = blockDim.y;
  const int_t bx = blockDim.x;
