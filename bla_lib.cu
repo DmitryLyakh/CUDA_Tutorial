@@ -86,9 +86,9 @@ __device__ static unsigned int norm_wr_lock = 0; //reduction lock (per GPU)
 template <typename T>
 __global__ void gpu_array_add(size_t arr_size, T * __restrict__ arr0, const T * __restrict__ arr1);
 
-const int TILE_EXT_M = 16;
-const int TILE_EXT_N = 16;
-const int TILE_EXT_K = 16;
+const int TILE_EXT_M = 32;
+const int TILE_EXT_N = 32;
+const int TILE_EXT_K = 32;
 template <typename T>
 __global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
 template <typename T>
@@ -195,8 +195,13 @@ __global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const
 {
  __shared__ T lbuf[TILE_EXT_K][TILE_EXT_M], rbuf[TILE_EXT_K][TILE_EXT_N];
 
- size_t ty = blockIdx.y*blockDim.y + threadIdx.y; //blockDim.y = TILE_EXT_M
- size_t tx = blockIdx.x*blockDim.x + threadIdx.x; //blockDim.x = TILE_EXT_N
+ const size_t by = blockDim.y;
+ const size_t bx = blockDim.x;
+ const size_t ly = threadIdx.y;
+ const size_t lx = threadIdx.x;
+ const size_t ty = blockIdx.y*blockDim.y + threadIdx.y; //blockDim.y = TILE_EXT_M
+ const size_t tx = blockIdx.x*blockDim.x + threadIdx.x; //blockDim.x = TILE_EXT_N
+
  size_t n_pos = ty;
  while(n_pos < n){
   size_t m_pos = tx;
@@ -205,26 +210,29 @@ __global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const
    size_t k_pos = 0;
    while(k_pos < k){
     size_t k_end = k_pos + TILE_EXT_K; if(k_end > k) k_end = k;
-    size_t k_loc = k_pos + threadIdx.y;
-    size_t k_incr = blockDim.y; if(n_pos - threadIdx.y + blockDim.y > n) k_incr = n - (n_pos - threadIdx.y);
+    size_t k_loc = k_pos + ly;
+    size_t k_incr = by; if(n_pos - ly + by > n) k_incr = n - (n_pos - ly);
     while(k_loc < k_end){
-     lbuf[k_loc-k_pos][threadIdx.x] = left[k_loc*m + m_pos];
+     //lbuf[k_loc-k_pos][lx] = static_cast<T>(1.0); //debug
+     lbuf[k_loc-k_pos][lx] = left[k_loc*m + m_pos];
      k_loc += k_incr;
     }
-    k_loc = k_pos + threadIdx.x;
-    k_incr = blockDim.x; if(m_pos - threadIdx.x + blockDim.x > m) k_incr = m - (m_pos - threadIdx.x);
+    k_loc = k_pos + lx;
+    k_incr = bx; if(m_pos - lx + bx > m) k_incr = m - (m_pos - lx);
     while(k_loc < k_end){
-     rbuf[k_loc-k_pos][threadIdx.y] = right[n_pos*k + k_loc];
+     //rbuf[k_loc-k_pos][ly] = static_cast<T>(1.0); //debug
+     rbuf[k_loc-k_pos][ly] = right[n_pos*k + k_loc];
      k_loc += k_incr;
     }
     __syncthreads();
     /* debug
-    if(threadIdx.x == 0 && threadIdx.y == 0){
+    if(lx == 0 && ly == 0){
      printf("Block {%d,%d}: %llu %llu %llu\n",blockIdx.x,blockIdx.y,m_pos,n_pos,k_pos);
     }
     */
     for(size_t i = 0; i < (k_end - k_pos); ++i){
-     tmp += lbuf[i][threadIdx.x] * rbuf[i][threadIdx.y];
+     //tmp += static_cast<T>(1.0); //debug
+     tmp += lbuf[i][lx] * rbuf[i][ly];
     }
     __syncthreads();
     k_pos += TILE_EXT_K;
