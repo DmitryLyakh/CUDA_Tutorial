@@ -43,8 +43,6 @@ void use_bla()
  bla::Matrix<float> C(1000,3000);
  //Allocate matrix C body on GPU#0:
  C.allocateBody(0,bla::MemKind::Regular);
- //Set matrix C body to zero on GPU#0:
- C.zeroBody(0);
 
  //Copy matrix A to GPU#0 from Host:
  A.syncBody(0,-1);
@@ -55,9 +53,12 @@ void use_bla()
  auto normB = B.computeNorm(0);
  std::cout << "Matrix B norm = " << normB << std::endl;
 
- //Perform matrix multiplication on GPU#0 with cuBLAS:
+ //Determine total number of floating point operations:
  double flops = 2.0*std::sqrt(static_cast<double>(A.getVolume()) * static_cast<double>(B.getVolume()) * static_cast<double>(C.getVolume()));
- bla::reset_gemm_algorithm(1);
+
+ //Perform matrix multiplication on GPU#0 with cuBLAS:
+ C.zeroBody(0); //set matrix C body to zero on GPU#0
+ bla::reset_gemm_algorithm(2);
  std::cout << "Performing matrix multiplication C+=A*B with cuBLAS ... ";
  double tms = bla::time_sys_sec();
  C.multiplyAdd(false,false,A,B,0);
@@ -67,19 +68,37 @@ void use_bla()
  auto normC = C.computeNorm(0);
  std::cout << "Matrix C norm = " << normC << std::endl;
 
- //Perform matrix multiplication on GPU#0 with BLA BLAS:
- C.zeroBody(0); //Set matrix C body to zero on GPU#0:
- bla::reset_gemm_algorithm(0);
- std::cout << "Performing matrix multiplication C+=A*B with BLA BLAS ... ";
- tms = bla::time_sys_sec();
- C.multiplyAdd(false,false,A,B,0);
- tmf = bla::time_sys_sec();
- std::cout << "Done: Time = " << tmf-tms << " s: Gflop/s = " << flops/(tmf-tms)/1e9 << std::endl;
- //Compute C norm on GPU#0:
- auto norm_diff = normC;
- normC = C.computeNorm(0);
- norm_diff -= normC;
- std::cout << "Matrix C norm = " << normC << ": Error = " << std::abs(norm_diff) << std::endl;
+ //Perform matrix multiplication on GPU#0 with BLA GEMM brute-force:
+ for(int repeat = 0; repeat < 2; ++repeat){
+  C.zeroBody(0); //set matrix C body to zero on GPU#0
+  bla::reset_gemm_algorithm(0);
+  std::cout << "Performing matrix multiplication C+=A*B with BLA GEMM brute-force ... ";
+  tms = bla::time_sys_sec();
+  C.multiplyAdd(false,false,A,B,0);
+  tmf = bla::time_sys_sec();
+  std::cout << "Done: Time = " << tmf-tms << " s: Gflop/s = " << flops/(tmf-tms)/1e9 << std::endl;
+  //Compute C norm on GPU#0:
+  auto norm_diff = normC;
+  normC = C.computeNorm(0);
+  norm_diff -= normC;
+  std::cout << "Matrix C norm = " << normC << ": Error = " << std::abs(norm_diff) << std::endl;
+ }
+
+ //Perform matrix multiplication on GPU#0 with BLA GEMM with shared memory:
+ for(int repeat = 0; repeat < 2; ++repeat){
+  C.zeroBody(0); //set matrix C body to zero on GPU#0
+  bla::reset_gemm_algorithm(1);
+  std::cout << "Performing matrix multiplication C+=A*B with BLA GEMM with shared memory ... ";
+  tms = bla::time_sys_sec();
+  C.multiplyAdd(false,false,A,B,0);
+  tmf = bla::time_sys_sec();
+  std::cout << "Done: Time = " << tmf-tms << " s: Gflop/s = " << flops/(tmf-tms)/1e9 << std::endl;
+  //Compute C norm on GPU#0:
+  auto norm_diff = normC;
+  normC = C.computeNorm(0);
+  norm_diff -= normC;
+  std::cout << "Matrix C norm = " << normC << ": Error = " << std::abs(norm_diff) << std::endl;
+ }
 
  std::cout << "Seems like it works?" << std::endl;
  return;

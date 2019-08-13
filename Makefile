@@ -1,7 +1,9 @@
 BINARY_NAME = bla_test.x
 
 CXX_COMP = g++
-CXX_FLAGS = -c -O3 -std=c++11 -fPIC -D_FORCE_INLINES
+CXX_FLAGS_DEV = -c -O3 -std=c++11 -fPIC -D_FORCE_INLINES -g
+CXX_FLAGS_OPT = -c -O3 -std=c++11 -fPIC -D_FORCE_INLINES
+CXX_FLAGS = $(CXX_FLAGS_OPT)
 CXX_INC =
 CXX_LIB = -lstdc++
 
@@ -10,7 +12,10 @@ CUDA_HOST = /usr/bin/g++
 CUDA_ARCH = sm_50
 CUDA_INC = -I/usr/local/cuda/include
 CUDA_LIB = -L/usr/local/cuda/lib64 -lcublas -lcudart
-CUDA_FLAGS = --compile -ccbin $(CUDA_HOST) -std=c++11 -arch=$(CUDA_ARCH) -O3 -lineinfo -w --resource-usage --ptxas-options=-v -Xcompiler -fPIC -D_FORCE_INLINES
+CUDA_FLAGS_DEV = --compile -ccbin $(CUDA_HOST) -std=c++11 -arch=$(CUDA_ARCH) -O3 -lineinfo -w --resource-usage --ptxas-options=-v -Xcompiler -fPIC -D_FORCE_INLINES -g -G
+CUDA_FLAGS_OPT = --compile -ccbin $(CUDA_HOST) -std=c++11 -arch=$(CUDA_ARCH) -O3 -m64 -w --resource-usage --ptxas-options=-v -Xcompiler -fPIC -D_FORCE_INLINES
+CUDA_FLAGS_ADV = --compile -ccbin $(CUDA_HOST) -std=c++11 -arch=$(CUDA_ARCH) -O3 -lineinfo -w --resource-usage --ptxas-options=-v -Xcompiler -fPIC -D_FORCE_INLINES
+CUDA_FLAGS = $(CUDA_FLAGS_OPT)
 
 LINK_FLAGS = -fPIC
 

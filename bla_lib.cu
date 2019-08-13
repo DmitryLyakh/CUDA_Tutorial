@@ -86,9 +86,9 @@ __device__ static unsigned int norm_wr_lock = 0; //reduction lock (per GPU)
 template <typename T>
 __global__ void gpu_array_add(size_t arr_size, T * __restrict__ arr0, const T * __restrict__ arr1);
 
-const int TILE_EXT_M = 32;
-const int TILE_EXT_N = 32;
-const int TILE_EXT_K = 32;
+const int TILE_EXT_M = 16; //tile dimension M
+const int TILE_EXT_N = 16; //tile dimension N
+const int TILE_EXT_K = 64; //tile dimension K
 template <typename T>
 __global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
 template <typename T>
@@ -193,53 +193,64 @@ __global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T 
 template <typename T>
 __global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
 {
- __shared__ T lbuf[TILE_EXT_K][TILE_EXT_M], rbuf[TILE_EXT_K][TILE_EXT_N];
+ using int_t = int; //either int or size_t
+ __shared__ T lbuf[TILE_EXT_K][TILE_EXT_M], rbuf[TILE_EXT_N][TILE_EXT_K];
 
- const size_t by = blockDim.y;
- const size_t bx = blockDim.x;
- const size_t ly = threadIdx.y;
- const size_t lx = threadIdx.x;
- const size_t ty = blockIdx.y*blockDim.y + threadIdx.y; //blockDim.y = TILE_EXT_M
- const size_t tx = blockIdx.x*blockDim.x + threadIdx.x; //blockDim.x = TILE_EXT_N
+ const int_t by = blockDim.y;
+ const int_t bx = blockDim.x;
+ const int_t ly = threadIdx.y;
+ const int_t lx = threadIdx.x;
+ const int_t ty = blockIdx.y*blockDim.y + threadIdx.y; //blockDim.y = TILE_EXT_M
+ const int_t tx = blockIdx.x*blockDim.x + threadIdx.x; //blockDim.x = TILE_EXT_N
 
- size_t n_pos = ty;
- while(n_pos < n){
-  size_t m_pos = tx;
-  while(m_pos < m){
+ int_t n_pos = ty;
+ while(n_pos < n){ //n_pos is the position of the CUDA thread along the N dimension
+
+  int_t m_pos = tx;
+  while(m_pos < m){ //m_pos is the position of the CUDA thread along the M dimension
+
    T tmp = static_cast<T>(0.0);
-   size_t k_pos = 0;
-   while(k_pos < k){
-    size_t k_end = k_pos + TILE_EXT_K; if(k_end > k) k_end = k;
-    size_t k_loc = k_pos + ly;
-    size_t k_incr = by; if(n_pos - ly + by > n) k_incr = n - (n_pos - ly);
+   int_t k_pos = 0;
+   while(k_pos < k){ //k_pos is the position of the CUDA thread along the K dimension
+
+    //Load a tile of matrix A(m_pos:TILE_EXT_M, k_pos:TILE_EXT_K):
+    int_t k_end = k_pos + TILE_EXT_K; if(k_end > k) k_end = k;
+    int_t k_loc = k_pos + ly;
+    int_t k_incr = by; if(n_pos - ly + by > n) k_incr = n - (n_pos - ly);
     while(k_loc < k_end){
-     //lbuf[k_loc-k_pos][lx] = static_cast<T>(1.0); //debug
      lbuf[k_loc-k_pos][lx] = left[k_loc*m + m_pos];
      k_loc += k_incr;
     }
+
+    //Load a tile of matrix B(k_pos:TILE_EXT_K, n_pos:TILE_EXT_N):
     k_loc = k_pos + lx;
     k_incr = bx; if(m_pos - lx + bx > m) k_incr = m - (m_pos - lx);
     while(k_loc < k_end){
-     //rbuf[k_loc-k_pos][ly] = static_cast<T>(1.0); //debug
-     rbuf[k_loc-k_pos][ly] = right[n_pos*k + k_loc];
+     rbuf[ly][k_loc-k_pos] = right[n_pos*k + k_loc];
      k_loc += k_incr;
     }
     __syncthreads();
-    /* debug
-    if(lx == 0 && ly == 0){
-     printf("Block {%d,%d}: %llu %llu %llu\n",blockIdx.x,blockIdx.y,m_pos,n_pos,k_pos);
-    }
-    */
-    for(size_t i = 0; i < (k_end - k_pos); ++i){
-     //tmp += static_cast<T>(1.0); //debug
-     tmp += lbuf[i][lx] * rbuf[i][ly];
+
+    //Multiply two loaded tiles to produce a tile of matrix C(m_pos:TILE_EXT_M,n_pos:TILE_EXT_N):
+    if(k_end - k_pos == TILE_EXT_K){
+#pragma unroll
+     for(int_t i = 0; i < TILE_EXT_K; ++i){
+      tmp += lbuf[i][lx] * rbuf[ly][i];
+     }
+    }else{
+     for(int_t i = 0; i < (k_end - k_pos); ++i){
+      tmp += lbuf[i][lx] * rbuf[ly][i];
+     }
     }
     __syncthreads();
     k_pos += TILE_EXT_K;
+
    }
    dest[n_pos*m + m_pos] += tmp;
+
    m_pos += gridDim.x*blockDim.x;
   }
+
   n_pos += gridDim.y*blockDim.y;
  }
  return;
@@ -255,6 +266,14 @@ __global__ void gpu_gemm_tn(int m, int n, int k, T * __restrict__ dest, const T 
 
 
 template <typename T>
+__global__ void gpu_gemm_sh_tn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+{
+ //`Finish
+ return;
+}
+
+
+template <typename T>
 __global__ void gpu_gemm_nt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
 {
  //`Finish
@@ -263,7 +282,23 @@ __global__ void gpu_gemm_nt(int m, int n, int k, T * __restrict__ dest, const T 
 
 
 template <typename T>
+__global__ void gpu_gemm_sh_nt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+{
+ //`Finish
+ return;
+}
+
+
+template <typename T>
 __global__ void gpu_gemm_tt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+{
+ //`Finish
+ return;
+}
+
+
+template <typename T>
+__global__ void gpu_gemm_sh_tt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
 {
  //`Finish
  return;
@@ -304,13 +339,12 @@ void matrix_multiplication_gpu_(bool left_transp, bool right_transp,
                                const T * matrix1_body, int nrows1, int ncols1,
                                const T * matrix2_body, int nrows2, int ncols2)
 {
- if(gemmAlgorithm == 0){ //BLA GEMM
+ if(gemmAlgorithm == 0){ //BLA GEMM brute-force
   if(!left_transp && !right_transp){
    int m = nrows0, n = ncols0, k = ncols1;
    dim3 threads(TILE_EXT_M,TILE_EXT_N);
    dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
-   //gpu_gemm_nn<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
-   gpu_gemm_sh_nn<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+   gpu_gemm_nn<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }else if(left_transp && !right_transp){
    int m = nrows0, n = ncols0, k = nrows1;
    dim3 threads(TILE_EXT_M,TILE_EXT_N);
@@ -327,8 +361,28 @@ void matrix_multiplication_gpu_(bool left_transp, bool right_transp,
    dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
    gpu_gemm_tt<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }
-  cudaError_t cuerr = cudaDeviceSynchronize();
-  cuerr = cudaGetLastError(); assert(cuerr == cudaSuccess);
+ }else if(gemmAlgorithm == 1){ //BLA GEMM with shared memory
+  if(!left_transp && !right_transp){
+   int m = nrows0, n = ncols0, k = ncols1;
+   dim3 threads(TILE_EXT_M,TILE_EXT_N);
+   dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
+   gpu_gemm_sh_nn<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+  }else if(left_transp && !right_transp){
+   int m = nrows0, n = ncols0, k = nrows1;
+   dim3 threads(TILE_EXT_M,TILE_EXT_N);
+   dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
+   gpu_gemm_sh_tn<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+  }else if(!left_transp && right_transp){
+   int m = nrows0, n = ncols0, k = ncols1;
+   dim3 threads(TILE_EXT_M,TILE_EXT_N);
+   dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
+   gpu_gemm_sh_nt<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+  }else if(left_transp && right_transp){
+   int m = nrows0, n = ncols0, k = nrows1;
+   dim3 threads(TILE_EXT_M,TILE_EXT_N);
+   dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
+   gpu_gemm_sh_tt<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+  }
  }else{ //cuBLAS GEMM
   int dev; cudaError_t cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
   cublasOperation_t transa = CUBLAS_OP_N; if(left_transp) transa = CUBLAS_OP_T;
@@ -355,9 +409,9 @@ void matrix_multiplication_gpu_(bool left_transp, bool right_transp,
                                        matrix0_body,CudaFPData<T>::kind,nrows0,
                                        CudaFPData<T>::kind, CUBLAS_GEMM_DEFAULT);
   assert(custat == CUBLAS_STATUS_SUCCESS);
-  cuerr = cudaDeviceSynchronize();
-  cuerr = cudaGetLastError(); assert(cuerr == cudaSuccess);
  }
+ cudaError_t cuerr = cudaDeviceSynchronize();
+ cuerr = cudaGetLastError(); assert(cuerr == cudaSuccess);
  return;
 }
 
