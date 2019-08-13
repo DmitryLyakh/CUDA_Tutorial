@@ -12,7 +12,7 @@ CUDA_HOST = /usr/bin/g++
 CUDA_ARCH = sm_50
 CUDA_INC = -I/usr/local/cuda/include
 CUDA_LIB = -L/usr/local/cuda/lib64 -lcublas -lcudart
-CUDA_FLAGS_DEV = --compile -ccbin $(CUDA_HOST) -std=c++11 -arch=$(CUDA_ARCH) -O3 -lineinfo -w --resource-usage --ptxas-options=-v -Xcompiler -fPIC -D_FORCE_INLINES -g -G
+CUDA_FLAGS_DEV = --compile -ccbin $(CUDA_HOST) -std=c++11 -arch=$(CUDA_ARCH) -O3 -w --resource-usage --ptxas-options=-v -Xcompiler -fPIC -D_FORCE_INLINES -g -G
 CUDA_FLAGS_OPT = --compile -ccbin $(CUDA_HOST) -std=c++11 -arch=$(CUDA_ARCH) -O3 -m64 -w --resource-usage --ptxas-options=-v -Xcompiler -fPIC -D_FORCE_INLINES
 CUDA_FLAGS_ADV = --compile -ccbin $(CUDA_HOST) -std=c++11 -arch=$(CUDA_ARCH) -O3 -lineinfo -w --resource-usage --ptxas-options=-v -Xcompiler -fPIC -D_FORCE_INLINES
 CUDA_FLAGS = $(CUDA_FLAGS_OPT)
@@ -31,6 +31,7 @@ memory.o: memory.cpp memory.hpp
 	$(CXX_COMP) $(CXX_FLAGS) $(CXX_INC) $(CUDA_INC) memory.cpp
 
 bla_lib.o: bla_lib.cu bla_lib.hpp matrix.hpp memory.hpp timer.hpp
+	$(CUDA_COMP) $(CUDA_FLAGS) $(CXX_INC) $(CUDA_INC) --ptx --source-in-ptx bla_lib.cu -o bla_lib.ptx
 	$(CUDA_COMP) $(CUDA_FLAGS) $(CXX_INC) $(CUDA_INC) bla_lib.cu
 
 main.o: main.cpp bla_lib.cu bla_lib.hpp memory.hpp

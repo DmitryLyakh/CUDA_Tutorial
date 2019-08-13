@@ -173,17 +173,22 @@ __global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T 
 {
  size_t ty = blockIdx.y*blockDim.y + threadIdx.y;
  size_t tx = blockIdx.x*blockDim.x + threadIdx.x;
+
  size_t n_pos = ty;
  while(n_pos < n){
+
   size_t m_pos = tx;
   while(m_pos < m){
+
    T tmp = static_cast<T>(0.0);
    for(size_t k_pos = 0; k_pos < k; ++k_pos){
     tmp += left[k_pos*m + m_pos] * right[n_pos*k + k_pos];
    }
    dest[n_pos*m + m_pos] += tmp;
+
    m_pos += gridDim.x*blockDim.x;
   }
+
   n_pos += gridDim.y*blockDim.y;
  }
  return;
@@ -232,20 +237,21 @@ __global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const
     __syncthreads();
 
     //Multiply two loaded tiles to produce a tile of matrix C(m_pos:TILE_EXT_M,n_pos:TILE_EXT_N):
-    if(k_end - k_pos == TILE_EXT_K){
+    if(k_end - k_pos == TILE_EXT_K){ //number of loop iterations is known at compile time: Unroll it
 #pragma unroll
      for(int_t i = 0; i < TILE_EXT_K; ++i){
       tmp += lbuf[i][lx] * rbuf[ly][i];
      }
-    }else{
+    }else{ //number of loop iterations is not known at compile time
      for(int_t i = 0; i < (k_end - k_pos); ++i){
       tmp += lbuf[i][lx] * rbuf[ly][i];
      }
     }
     __syncthreads();
-    k_pos += TILE_EXT_K;
 
+    k_pos += TILE_EXT_K;
    }
+   //Save the computed element of matrix C:
    dest[n_pos*m + m_pos] += tmp;
 
    m_pos += gridDim.x*blockDim.x;
