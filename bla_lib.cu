@@ -203,12 +203,12 @@ __global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const
  using int_t = int; //either int or size_t
  __shared__ T lbuf[TILE_EXT_K][TILE_EXT_M], rbuf[TILE_EXT_N][TILE_EXT_K];
 
- const int_t by = blockDim.y;
- const int_t bx = blockDim.x;
+ const int_t by = blockDim.y; //blockDim.y = TILE_EXT_N
+ const int_t bx = blockDim.x; //blockDim.x = TILE_EXT_M
  const int_t ly = threadIdx.y;
  const int_t lx = threadIdx.x;
- const int_t ty = blockIdx.y*blockDim.y + threadIdx.y; //blockDim.y = TILE_EXT_M
- const int_t tx = blockIdx.x*blockDim.x + threadIdx.x; //blockDim.x = TILE_EXT_N
+ const int_t ty = blockIdx.y*blockDim.y + threadIdx.y; //blockDim.y = TILE_EXT_N
+ const int_t tx = blockIdx.x*blockDim.x + threadIdx.x; //blockDim.x = TILE_EXT_M
 
  int_t n_pos = ty;
  while(n_pos < n){ //n_pos is the position of the CUDA thread along the N dimension
@@ -270,14 +270,14 @@ __global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, c
 {
  using int_t = int; //either int or size_t
  __shared__ T lbuf[TILE_EXT_K][TILE_EXT_M], rbuf[TILE_EXT_N][TILE_EXT_K], dbuf[TILE_EXT_N][TILE_EXT_M];
- T lreg[2][8], rreg[2][4], dreg[4][8];
+ T lreg[8], rreg[4], dreg[4][8];
 
- const int_t by = blockDim.y;
- const int_t bx = blockDim.x;
+ const int_t by = blockDim.y; //blockDim.y = TILE_EXT_N
+ const int_t bx = blockDim.x; //blockDim.x = TILE_EXT_M
  const int_t ly = threadIdx.y;
  const int_t lx = threadIdx.x;
- const int_t ty = blockIdx.y*blockDim.y + threadIdx.y; //blockDim.y = TILE_EXT_M
- const int_t tx = blockIdx.x*blockDim.x + threadIdx.x; //blockDim.x = TILE_EXT_N
+ const int_t ty = blockIdx.y*blockDim.y + threadIdx.y; //blockDim.y = TILE_EXT_N
+ const int_t tx = blockIdx.x*blockDim.x + threadIdx.x; //blockDim.x = TILE_EXT_M
 
  int_t n_pos = ty;
  while(n_pos < n){ //n_pos is the position of the CUDA thread along the N dimension
