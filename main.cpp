@@ -55,27 +55,31 @@ void use_bla()
 
  //Determine total number of floating point operations:
  double flops = 2.0*std::sqrt(static_cast<double>(A.getVolume()) * static_cast<double>(B.getVolume()) * static_cast<double>(C.getVolume()));
+ std::cout << "Matrix multiplication C+=A*B requires " << flops/1e9 << " Gflop" << std::endl;
 
  //Perform matrix multiplication on GPU#0 with cuBLAS:
- C.zeroBody(0); //set matrix C body to zero on GPU#0
- bla::reset_gemm_algorithm(2);
- std::cout << "Performing matrix multiplication C+=A*B with cuBLAS ... ";
- double tms = bla::time_sys_sec();
- C.multiplyAdd(false,false,A,B,0);
- double tmf = bla::time_sys_sec();
- std::cout << "Done: Time = " << tmf-tms << " s: Gflop/s = " << flops/(tmf-tms)/1e9 << std::endl;
- //Compute C norm on GPU#0:
- auto normC = C.computeNorm(0);
- std::cout << "Matrix C norm = " << normC << std::endl;
+ double normC;
+ for(int repeat = 0; repeat < 2; ++repeat){
+  C.zeroBody(0); //set matrix C body to zero on GPU#0
+  bla::reset_gemm_algorithm(2);
+  std::cout << "Performing matrix multiplication C+=A*B with cuBLAS ... ";
+  double tms = bla::time_sys_sec();
+  C.multiplyAdd(false,false,A,B,0);
+  double tmf = bla::time_sys_sec();
+  std::cout << "Done: Time = " << tmf-tms << " s: Gflop/s = " << flops/(tmf-tms)/1e9 << std::endl;
+  //Compute C norm on GPU#0:
+  normC = C.computeNorm(0);
+  std::cout << "Matrix C norm = " << normC << std::endl;
+ }
 
  //Perform matrix multiplication on GPU#0 with BLA GEMM brute-force:
  for(int repeat = 0; repeat < 2; ++repeat){
   C.zeroBody(0); //set matrix C body to zero on GPU#0
   bla::reset_gemm_algorithm(0);
   std::cout << "Performing matrix multiplication C+=A*B with BLA GEMM brute-force ... ";
-  tms = bla::time_sys_sec();
+  double tms = bla::time_sys_sec();
   C.multiplyAdd(false,false,A,B,0);
-  tmf = bla::time_sys_sec();
+  double tmf = bla::time_sys_sec();
   std::cout << "Done: Time = " << tmf-tms << " s: Gflop/s = " << flops/(tmf-tms)/1e9 << std::endl;
   //Compute C norm on GPU#0:
   auto norm_diff = normC;
@@ -89,9 +93,9 @@ void use_bla()
   C.zeroBody(0); //set matrix C body to zero on GPU#0
   bla::reset_gemm_algorithm(1);
   std::cout << "Performing matrix multiplication C+=A*B with BLA GEMM with shared memory ... ";
-  tms = bla::time_sys_sec();
+  double tms = bla::time_sys_sec();
   C.multiplyAdd(false,false,A,B,0);
-  tmf = bla::time_sys_sec();
+  double tmf = bla::time_sys_sec();
   std::cout << "Done: Time = " << tmf-tms << " s: Gflop/s = " << flops/(tmf-tms)/1e9 << std::endl;
   //Compute C norm on GPU#0:
   auto norm_diff = normC;
@@ -107,7 +111,6 @@ void use_bla()
 
 int main(int argc, char ** argv)
 {
-
 //Initialize BLA library:
  bla::init();
  bla::print_device_properties(0); //check compute capability
