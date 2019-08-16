@@ -39,6 +39,9 @@ void shutdown();
 /** Testing BLA **/
 bool test_bla();
 
+/** Device properites **/
+void print_device_properties(int device);
+
 /** Resets GEMM algorithm:
     0: Custom GEMM from BLA;
     1: cuBLAS GEMM. **/

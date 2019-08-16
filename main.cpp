@@ -110,6 +110,7 @@ int main(int argc, char ** argv)
 
 //Initialize BLA library:
  bla::init();
+ bla::print_device_properties(0); //check compute capability
 
 //Test BLA library:
  bla::test_bla();

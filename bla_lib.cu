@@ -602,6 +602,21 @@ void shutdown()
 }
 
 
+void print_device_properties(int device)
+{
+ cudaDeviceProp prop;
+ cudaError_t cuerr = cudaGetDeviceProperties(&prop,device);
+ if(cuerr == cudaSuccess){
+  std::cout << "Properties of NVIDIA GPU " << device << std::endl;
+  std::cout << " Compute capability: " << prop.major << "." << prop.minor << std::endl;
+ }else{
+  std::cout << "#ERROR(bla::print_device_properties): Unable to get properties for device " << device << std::endl;
+  assert(false);
+ }
+ return;
+}
+
+
 void reset_gemm_algorithm(int algo)
 {
  gemmAlgorithm = algo;
