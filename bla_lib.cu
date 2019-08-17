@@ -86,21 +86,33 @@ __device__ static unsigned int norm_wr_lock = 0; //reduction lock (per GPU)
 template <typename T>
 __global__ void gpu_array_add(size_t arr_size, T * __restrict__ arr0, const T * __restrict__ arr1);
 
-const int TILE_EXT_N = 16; //tile dimension N
-const int TILE_EXT_M = 16; //tile dimension M
-const int TILE_EXT_K = 64; //tile dimension K
+
 template <typename T>
 __global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
-template <typename T>
+
+template <typename T, int TILE_EXT_N = 16, int TILE_EXT_M = 16, int TILE_EXT_K = 64>
 __global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
-template <typename T>
+
+template <typename T, int TILE_EXT_N = 16, int TILE_EXT_M = 16, int TILE_EXT_K = 64>
 __global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
+
 template <typename T>
 __global__ void gpu_gemm_tn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
+
+template <typename T, int TILE_EXT_N = 16, int TILE_EXT_M = 16, int TILE_EXT_K = 64>
+__global__ void gpu_gemm_sh_tn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
+
 template <typename T>
 __global__ void gpu_gemm_nt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
+
+template <typename T, int TILE_EXT_N = 16, int TILE_EXT_M = 16, int TILE_EXT_K = 64>
+__global__ void gpu_gemm_sh_nt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
+
 template <typename T>
 __global__ void gpu_gemm_tt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
+
+template <typename T, int TILE_EXT_N = 16, int TILE_EXT_M = 16, int TILE_EXT_K = 64>
+__global__ void gpu_gemm_sh_tt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
 
 
 //Dispatch wrappers:
@@ -173,8 +185,8 @@ __global__ void gpu_array_add(size_t arr_size, T * __restrict__ arr0, const T * 
 template <typename T>
 __global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
 {
- size_t ty = blockIdx.y*blockDim.y + threadIdx.y;
- size_t tx = blockIdx.x*blockDim.x + threadIdx.x;
+ size_t ty = blockIdx.y*blockDim.y + threadIdx.y; //global thread index Y
+ size_t tx = blockIdx.x*blockDim.x + threadIdx.x; //global thread index X
 
  size_t n_pos = ty;
  while(n_pos < n){
@@ -197,7 +209,7 @@ __global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T 
 }
 
 
-template <typename T>
+template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K>
 __global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
 {
  using int_t = int; //either int or size_t
@@ -205,10 +217,10 @@ __global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const
 
  const int_t by = blockDim.y; //blockDim.y = TILE_EXT_N
  const int_t bx = blockDim.x; //blockDim.x = TILE_EXT_M
- const int_t ly = threadIdx.y;
- const int_t lx = threadIdx.x;
- const int_t ty = blockIdx.y*blockDim.y + threadIdx.y; //blockDim.y = TILE_EXT_N
- const int_t tx = blockIdx.x*blockDim.x + threadIdx.x; //blockDim.x = TILE_EXT_M
+ const int_t ly = threadIdx.y; //local thread index Y
+ const int_t lx = threadIdx.x; //local thread index X
+ const int_t ty = blockIdx.y*blockDim.y + threadIdx.y; //global thread index Y
+ const int_t tx = blockIdx.x*blockDim.x + threadIdx.x; //global thread index X
 
  int_t n_pos = ty;
  while(n_pos < n){ //n_pos is the position of the CUDA thread along the N dimension
@@ -266,7 +278,7 @@ __global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const
 }
 
 
-template <typename T>
+template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K>
 __global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
 {
  using int_t = int; //either int or size_t
@@ -275,12 +287,12 @@ __global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, c
 
  const int_t by = blockDim.y; //blockDim.y = TILE_EXT_N
  const int_t bx = blockDim.x; //blockDim.x = TILE_EXT_M
- const int_t ly = threadIdx.y;
- const int_t lx = threadIdx.x;
- const int_t ty = blockIdx.y*blockDim.y + threadIdx.y; //blockDim.y = TILE_EXT_N
- const int_t tx = blockIdx.x*blockDim.x + threadIdx.x; //blockDim.x = TILE_EXT_M
- const int_t wy = ((threadIdx.y*blockDim.x + threadIdx.x) / warpSize) / (TILE_EXT_M/8); //warp fragment index Y
- const int_t wx = ((threadIdx.y*blockDim.x + threadIdx.x) / warpSize) % (TILE_EXT_M/8); //warp fragment index X
+ const int_t ly = threadIdx.y; //local thread index Y
+ const int_t lx = threadIdx.x; //local thread index X
+ const int_t ty = blockIdx.y*blockDim.y + threadIdx.y; //global thread index Y
+ const int_t tx = blockIdx.x*blockDim.x + threadIdx.x; //global thread index X
+ const int_t wy = ((threadIdx.y*blockDim.x + threadIdx.x) / warpSize) / (TILE_EXT_M/8); //local warp index Y
+ const int_t wx = ((threadIdx.y*blockDim.x + threadIdx.x) / warpSize) % (TILE_EXT_M/8); //local warp index X
  const int_t ln = (threadIdx.y*blockDim.x + threadIdx.x) % warpSize; //lane index inside a warp
  const int_t lny = ln / 8; //Y position inside warp fragment
  const int_t lnx = ln % 8; //X position inside warp fragment
@@ -441,7 +453,7 @@ __global__ void gpu_gemm_tn(int m, int n, int k, T * __restrict__ dest, const T 
 }
 
 
-template <typename T>
+template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K>
 __global__ void gpu_gemm_sh_tn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
 {
  //`Finish
@@ -457,7 +469,7 @@ __global__ void gpu_gemm_nt(int m, int n, int k, T * __restrict__ dest, const T 
 }
 
 
-template <typename T>
+template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K>
 __global__ void gpu_gemm_sh_nt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
 {
  //`Finish
@@ -473,7 +485,7 @@ __global__ void gpu_gemm_tt(int m, int n, int k, T * __restrict__ dest, const T 
 }
 
 
-template <typename T>
+template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K>
 __global__ void gpu_gemm_sh_tt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
 {
  //`Finish
@@ -518,68 +530,68 @@ void matrix_multiplication_gpu_(bool left_transp, bool right_transp,
  if(gemmAlgorithm == 0){ //BLA GEMM brute-force
   if(!left_transp && !right_transp){
    int m = nrows0, n = ncols0, k = ncols1;
-   dim3 threads(TILE_EXT_M,TILE_EXT_N);
-   dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
+   dim3 threads(32,32);
+   dim3 blocks((nrows0-1)/32+1,(ncols0-1)/32+1);
    gpu_gemm_nn<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }else if(left_transp && !right_transp){
    int m = nrows0, n = ncols0, k = nrows1;
-   dim3 threads(TILE_EXT_M,TILE_EXT_N);
-   dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
+   dim3 threads(32,32);
+   dim3 blocks((nrows0-1)/32+1,(ncols0-1)/32+1);
    gpu_gemm_tn<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }else if(!left_transp && right_transp){
    int m = nrows0, n = ncols0, k = ncols1;
-   dim3 threads(TILE_EXT_M,TILE_EXT_N);
-   dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
+   dim3 threads(32,32);
+   dim3 blocks((nrows0-1)/32+1,(ncols0-1)/32+1);
    gpu_gemm_nt<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }else if(left_transp && right_transp){
    int m = nrows0, n = ncols0, k = nrows1;
-   dim3 threads(TILE_EXT_M,TILE_EXT_N);
-   dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
+   dim3 threads(32,32);
+   dim3 blocks((nrows0-1)/32+1,(ncols0-1)/32+1);
    gpu_gemm_tt<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }
  }else if(gemmAlgorithm == 1){ //BLA GEMM with shared memory
   if(!left_transp && !right_transp){
    int m = nrows0, n = ncols0, k = ncols1;
-   dim3 threads(TILE_EXT_M,TILE_EXT_N);
-   dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
-   gpu_gemm_sh_nn<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+   dim3 threads(16,16);
+   dim3 blocks((nrows0-1)/16+1,(ncols0-1)/16+1);
+   gpu_gemm_sh_nn<T,16,16,64><<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }else if(left_transp && !right_transp){
    int m = nrows0, n = ncols0, k = nrows1;
-   dim3 threads(TILE_EXT_M,TILE_EXT_N);
-   dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
-   gpu_gemm_sh_tn<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+   dim3 threads(16,16);
+   dim3 blocks((nrows0-1)/16+1,(ncols0-1)/16+1);
+   gpu_gemm_sh_tn<T,16,16,64><<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }else if(!left_transp && right_transp){
    int m = nrows0, n = ncols0, k = ncols1;
-   dim3 threads(TILE_EXT_M,TILE_EXT_N);
-   dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
-   gpu_gemm_sh_nt<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+   dim3 threads(16,16);
+   dim3 blocks((nrows0-1)/16+1,(ncols0-1)/16+1);
+   gpu_gemm_sh_nt<T,16,16,64><<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }else if(left_transp && right_transp){
    int m = nrows0, n = ncols0, k = nrows1;
-   dim3 threads(TILE_EXT_M,TILE_EXT_N);
-   dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
-   gpu_gemm_sh_tt<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+   dim3 threads(16,16);
+   dim3 blocks((nrows0-1)/16+1,(ncols0-1)/16+1);
+   gpu_gemm_sh_tt<T,16,16,64><<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }
  }else if(gemmAlgorithm == 2){ //BLA GEMM with shared memory and register file
   if(!left_transp && !right_transp){
    int m = nrows0, n = ncols0, k = ncols1;
-   dim3 threads(TILE_EXT_M,TILE_EXT_N);
-   dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
-   gpu_gemm_sh_reg_nn<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+   dim3 threads(16,16);
+   dim3 blocks((nrows0-1)/16+1,(ncols0-1)/16+1);
+   gpu_gemm_sh_reg_nn<T,16,16,64><<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }else if(left_transp && !right_transp){
    int m = nrows0, n = ncols0, k = nrows1;
-   dim3 threads(TILE_EXT_M,TILE_EXT_N);
-   dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
-   //gpu_gemm_sh_reg_tn<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+   dim3 threads(16,16);
+   dim3 blocks((nrows0-1)/16+1,(ncols0-1)/16+1);
+   //gpu_gemm_sh_reg_tn<T,16,16,64><<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }else if(!left_transp && right_transp){
    int m = nrows0, n = ncols0, k = ncols1;
-   dim3 threads(TILE_EXT_M,TILE_EXT_N);
-   dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
-   //gpu_gemm_sh_reg_nt<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+   dim3 threads(16,16);
+   dim3 blocks((nrows0-1)/16+1,(ncols0-1)/16+1);
+   //gpu_gemm_sh_reg_nt<T,16,16,64><<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }else if(left_transp && right_transp){
    int m = nrows0, n = ncols0, k = nrows1;
-   dim3 threads(TILE_EXT_M,TILE_EXT_N);
-   dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
-   //gpu_gemm_sh_reg_tt<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+   dim3 threads(16,16);
+   dim3 blocks((nrows0-1)/16+1,(ncols0-1)/16+1);
+   //gpu_gemm_sh_reg_tt<T,16,16,64><<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }
  }else{ //cuBLAS GEMM
   int dev; cudaError_t cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
