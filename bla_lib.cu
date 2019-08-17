@@ -86,8 +86,8 @@ __device__ static unsigned int norm_wr_lock = 0; //reduction lock (per GPU)
 template <typename T>
 __global__ void gpu_array_add(size_t arr_size, T * __restrict__ arr0, const T * __restrict__ arr1);
 
-const int TILE_EXT_M = 16; //tile dimension M
 const int TILE_EXT_N = 16; //tile dimension N
+const int TILE_EXT_M = 16; //tile dimension M
 const int TILE_EXT_K = 64; //tile dimension K
 template <typename T>
 __global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
@@ -253,6 +253,7 @@ __global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const
 
     k_pos += TILE_EXT_K;
    }
+
    //Save the computed element of matrix C:
    dest[n_pos*m + m_pos] += tmp;
 
@@ -278,6 +279,11 @@ __global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, c
  const int_t lx = threadIdx.x;
  const int_t ty = blockIdx.y*blockDim.y + threadIdx.y; //blockDim.y = TILE_EXT_N
  const int_t tx = blockIdx.x*blockDim.x + threadIdx.x; //blockDim.x = TILE_EXT_M
+ const int_t wy = ((threadIdx.y*blockDim.x + threadIdx.x) / warpSize) / (TILE_EXT_M/8); //warp fragment index Y
+ const int_t wx = ((threadIdx.y*blockDim.x + threadIdx.x) / warpSize) % (TILE_EXT_M/8); //warp fragment index X
+ const int_t ln = (threadIdx.y*blockDim.x + threadIdx.x) % warpSize; //lane index inside a warp
+ const int_t lny = ln / 8; //Y position inside warp fragment
+ const int_t lnx = ln % 8; //X position inside warp fragment
 
  int_t n_pos = ty;
  while(n_pos < n){ //n_pos is the position of the CUDA thread along the N dimension
@@ -285,45 +291,111 @@ __global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, c
   int_t m_pos = tx;
   while(m_pos < m){ //m_pos is the position of the CUDA thread along the M dimension
 
-   T tmp = static_cast<T>(0.0);
-   int_t k_pos = 0;
-   while(k_pos < k){ //k_pos is the position of the CUDA thread along the K dimension
-
-    //Load a tile of matrix A(m_pos:TILE_EXT_M, k_pos:TILE_EXT_K):
-    int_t k_end = k_pos + TILE_EXT_K; if(k_end > k) k_end = k;
-    int_t k_loc = k_pos + ly;
-    int_t k_incr = by; if(n_pos - ly + by > n) k_incr = n - (n_pos - ly);
-    while(k_loc < k_end){
-     lbuf[k_loc-k_pos][lx] = left[k_loc*m + m_pos];
-     k_loc += k_incr;
-    }
-
-    //Load a tile of matrix B(k_pos:TILE_EXT_K, n_pos:TILE_EXT_N):
-    k_loc = k_pos + lx;
-    k_incr = bx; if(m_pos - lx + bx > m) k_incr = m - (m_pos - lx);
-    while(k_loc < k_end){
-     rbuf[ly][k_loc-k_pos] = right[n_pos*k + k_loc];
-     k_loc += k_incr;
-    }
-    __syncthreads();
-
-    //Multiply two loaded tiles to produce a tile of matrix C(m_pos:TILE_EXT_M,n_pos:TILE_EXT_N):
-    if(k_end - k_pos == TILE_EXT_K){ //number of loop iterations is known at compile time: Unroll it
+   //Set a tile of C to zero in shared memory and registers:
+   dbuf[ly][lx] = static_cast<T>(0.0);
 #pragma unroll
-     for(int_t i = 0; i < TILE_EXT_K; ++i){
-      tmp += lbuf[i][lx] * rbuf[ly][i];
+   for(int_t j = 0; j < 4; ++j){
+#pragma unroll
+    for(int_t i = 0; i < 8; ++i){
+     dreg[j][i] = static_cast<T>(0.0);
+    }
+   }
+
+   if((m_pos - lx + TILE_EXT_M <= m) && (n_pos - ly + TILE_EXT_N) <= n){ //complete tile (TILE_EXT_N * TILE_EXT_M * TILE_EXT_K)
+
+    int_t k_pos = 0;
+    while(k_pos < k){ //k_pos is the position of the CUDA thread along the K dimension
+
+     //Load a tile of matrix A(m_pos:TILE_EXT_M, k_pos:TILE_EXT_K):
+     int_t k_end = k_pos + TILE_EXT_K; if(k_end > k) k_end = k;
+     int_t k_loc = k_pos + ly;
+     int_t k_incr = by; if(n_pos - ly + by > n) k_incr = n - (n_pos - ly);
+     while(k_loc < k_end){
+      lbuf[k_loc-k_pos][lx] = left[k_loc*m + m_pos];
+      k_loc += k_incr;
      }
-    }else{ //number of loop iterations is not known at compile time
-     for(int_t i = 0; i < (k_end - k_pos); ++i){
-      tmp += lbuf[i][lx] * rbuf[ly][i];
+
+     //Load a tile of matrix B(k_pos:TILE_EXT_K, n_pos:TILE_EXT_N):
+     k_loc = k_pos + lx;
+     k_incr = bx; if(m_pos - lx + bx > m) k_incr = m - (m_pos - lx);
+     while(k_loc < k_end){
+      rbuf[ly][k_loc-k_pos] = right[n_pos*k + k_loc];
+      k_loc += k_incr;
+     }
+     __syncthreads();
+
+     //Multiply two loaded tiles to produce a tile of matrix C(m_pos:TILE_EXT_M,n_pos:TILE_EXT_N):
+     for(int_t l = ln; l < (k_end - k_pos); l += warpSize){
+      //Load fragments of shared memory tiles into registers:
+      for(int_t j = 0; j < 4; ++j) rreg[j] = rbuf[wy*4 + j][l];
+      for(int_t j = 0; j < 8; ++j) lreg[j] = lbuf[l][wx*8 + j];
+      //Compute outer product of tile fragments in registers:
+#pragma unroll
+      for(int_t j = 0; j < 4; ++j){
+#pragma unroll
+       for(int_t i = 0; i < 8; ++i){
+        dreg[j][i] += lreg[i] * rreg[j];
+       }
+      }
+     }
+     __syncthreads();
+
+     k_pos += TILE_EXT_K;
+    }
+
+    //Perform reduction of the C fragment within each warp:
+#pragma unroll
+    for(int_t j = 0; j < 4; ++j){
+#pragma unroll
+     for(int_t i = 0; i < 8; ++i){
+      for(int_t l = 16; l > 0; l/=2){
+       dreg[j][i] += __shfl_xor_sync(0xffffffff,dreg[j][i],l);
+      }
      }
     }
+
+    //Upload C fragments into the shared memory tile:
+    dbuf[wy*4 + lny][wx*8 + lnx] = dreg[lny][lnx];
     __syncthreads();
 
-    k_pos += TILE_EXT_K;
+   }else{ //incomplete tile
+
+    int_t k_pos = 0;
+    while(k_pos < k){ //k_pos is the position of the CUDA thread along the K dimension
+
+     //Load a tile of matrix A(m_pos:TILE_EXT_M, k_pos:TILE_EXT_K):
+     int_t k_end = k_pos + TILE_EXT_K; if(k_end > k) k_end = k;
+     int_t k_loc = k_pos + ly;
+     int_t k_incr = by; if(n_pos - ly + by > n) k_incr = n - (n_pos - ly);
+     while(k_loc < k_end){
+      lbuf[k_loc-k_pos][lx] = left[k_loc*m + m_pos];
+      k_loc += k_incr;
+     }
+
+     //Load a tile of matrix B(k_pos:TILE_EXT_K, n_pos:TILE_EXT_N):
+     k_loc = k_pos + lx;
+     k_incr = bx; if(m_pos - lx + bx > m) k_incr = m - (m_pos - lx);
+     while(k_loc < k_end){
+      rbuf[ly][k_loc-k_pos] = right[n_pos*k + k_loc];
+      k_loc += k_incr;
+     }
+     __syncthreads();
+
+     //Multiply two loaded tiles to produce a tile of matrix C(m_pos:TILE_EXT_M,n_pos:TILE_EXT_N):
+     for(int_t l = 0; l < (k_end - k_pos); ++l){
+      dbuf[ly][lx] += lbuf[l][lx] * rbuf[ly][l];
+     }
+     __syncthreads();
+
+     k_pos += TILE_EXT_K;
+    }
+
    }
-   //Save the computed element of matrix C:
-   dest[n_pos*m + m_pos] += tmp;
+
+   //printf("dbuf[%d,%d]=%e\n",lx,ly,dbuf[ly][lx]);
+
+   //Store the shared memory tile of matrix C in global memory:
+   dest[n_pos*m + m_pos] += dbuf[ly][lx];
 
    m_pos += gridDim.x*blockDim.x;
   }
@@ -460,6 +532,28 @@ void matrix_multiplication_gpu_(bool left_transp, bool right_transp,
    dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
    gpu_gemm_sh_tt<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }
+ }else if(gemmAlgorithm == 2){ //BLA GEMM with shared memory and register file
+  if(!left_transp && !right_transp){
+   int m = nrows0, n = ncols0, k = ncols1;
+   dim3 threads(TILE_EXT_M,TILE_EXT_N);
+   dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
+   gpu_gemm_sh_reg_nn<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+  }else if(left_transp && !right_transp){
+   int m = nrows0, n = ncols0, k = nrows1;
+   dim3 threads(TILE_EXT_M,TILE_EXT_N);
+   dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
+   //gpu_gemm_sh_reg_tn<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+  }else if(!left_transp && right_transp){
+   int m = nrows0, n = ncols0, k = ncols1;
+   dim3 threads(TILE_EXT_M,TILE_EXT_N);
+   dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
+   //gpu_gemm_sh_reg_nt<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+  }else if(left_transp && right_transp){
+   int m = nrows0, n = ncols0, k = nrows1;
+   dim3 threads(TILE_EXT_M,TILE_EXT_N);
+   dim3 blocks((nrows0-1)/TILE_EXT_M+1,(ncols0-1)/TILE_EXT_N+1);
+   //gpu_gemm_sh_reg_tt<<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+  }
  }else{ //cuBLAS GEMM
   int dev; cudaError_t cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
   cublasOperation_t transa = CUBLAS_OP_N; if(left_transp) transa = CUBLAS_OP_T;
@@ -485,6 +579,7 @@ void matrix_multiplication_gpu_(bool left_transp, bool right_transp,
                                        beta,
                                        matrix0_body,CudaFPData<T>::kind,nrows0,
                                        CudaFPData<T>::kind, CUBLAS_GEMM_DEFAULT);
+  if(custat != CUBLAS_STATUS_SUCCESS) std::cout << "#ERROR(cublasGemmEx): Eror " << custat << std::endl;
   assert(custat == CUBLAS_STATUS_SUCCESS);
  }
  cudaError_t cuerr = cudaDeviceSynchronize();
