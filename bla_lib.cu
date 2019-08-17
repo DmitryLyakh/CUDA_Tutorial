@@ -284,6 +284,8 @@ __global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, c
  const int_t ln = (threadIdx.y*blockDim.x + threadIdx.x) % warpSize; //lane index inside a warp
  const int_t lny = ln / 8; //Y position inside warp fragment
  const int_t lnx = ln % 8; //X position inside warp fragment
+ const int_t wy4 = wy*4;
+ const int_t wx8 = wx*8;
 
  int_t n_pos = ty;
  while(n_pos < n){ //n_pos is the position of the CUDA thread along the N dimension
@@ -310,33 +312,56 @@ __global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, c
      int_t k_end = k_pos + TILE_EXT_K; if(k_end > k) k_end = k;
      int_t k_loc = k_pos + ly;
      int_t k_incr = by; if(n_pos - ly + by > n) k_incr = n - (n_pos - ly);
+#if 1
      while(k_loc < k_end){
       lbuf[k_loc-k_pos][lx] = left[k_loc*m + m_pos];
       k_loc += k_incr;
      }
+#endif
 
      //Load a tile of matrix B(k_pos:TILE_EXT_K, n_pos:TILE_EXT_N):
      k_loc = k_pos + lx;
      k_incr = bx; if(m_pos - lx + bx > m) k_incr = m - (m_pos - lx);
+#if 1
      while(k_loc < k_end){
       rbuf[ly][k_loc-k_pos] = right[n_pos*k + k_loc];
       k_loc += k_incr;
      }
+#endif
      __syncthreads();
 
      //Multiply two loaded tiles to produce a tile of matrix C(m_pos:TILE_EXT_M,n_pos:TILE_EXT_N):
-     for(int_t l = ln; l < (k_end - k_pos); l += warpSize){
+     for(int_t l = ln; l < (k_end - k_pos); l += 32){
       //Load fragments of shared memory tiles into registers:
-      for(int_t j = 0; j < 4; ++j) rreg[j] = rbuf[wy*4 + j][l];
-      for(int_t j = 0; j < 8; ++j) lreg[j] = lbuf[l][wx*8 + j];
+      rreg[0] = rbuf[wy4 + 0][l];
+      rreg[1] = rbuf[wy4 + 1][l];
+      rreg[2] = rbuf[wy4 + 2][l];
+      rreg[3] = rbuf[wy4 + 3][l];
+      lreg[0] = lbuf[l][wx8 + 0];
+      lreg[1] = lbuf[l][wx8 + 1];
+      lreg[2] = lbuf[l][wx8 + 2];
+      lreg[3] = lbuf[l][wx8 + 3];
+      lreg[4] = lbuf[l][wx8 + 4];
+      lreg[5] = lbuf[l][wx8 + 5];
+      lreg[6] = lbuf[l][wx8 + 6];
+      lreg[7] = lbuf[l][wx8 + 7];
       //Compute outer product of tile fragments in registers:
-#pragma unroll
-      for(int_t j = 0; j < 4; ++j){
-#pragma unroll
-       for(int_t i = 0; i < 8; ++i){
-        dreg[j][i] += lreg[i] * rreg[j];
-       }
-      }
+      dreg[0][0] += lreg[0] * rreg[0]; dreg[1][0] += lreg[0] * rreg[1];
+      dreg[0][1] += lreg[1] * rreg[0]; dreg[1][1] += lreg[1] * rreg[1];
+      dreg[0][2] += lreg[2] * rreg[0]; dreg[1][2] += lreg[2] * rreg[1];
+      dreg[0][3] += lreg[3] * rreg[0]; dreg[1][3] += lreg[3] * rreg[1];
+      dreg[0][4] += lreg[4] * rreg[0]; dreg[1][4] += lreg[4] * rreg[1];
+      dreg[0][5] += lreg[5] * rreg[0]; dreg[1][5] += lreg[5] * rreg[1];
+      dreg[0][6] += lreg[6] * rreg[0]; dreg[1][6] += lreg[6] * rreg[1];
+      dreg[0][7] += lreg[7] * rreg[0]; dreg[1][7] += lreg[7] * rreg[1];
+      dreg[2][0] += lreg[0] * rreg[2]; dreg[3][0] += lreg[0] * rreg[3];
+      dreg[2][1] += lreg[1] * rreg[2]; dreg[3][1] += lreg[1] * rreg[3];
+      dreg[2][2] += lreg[2] * rreg[2]; dreg[3][2] += lreg[2] * rreg[3];
+      dreg[2][3] += lreg[3] * rreg[2]; dreg[3][3] += lreg[3] * rreg[3];
+      dreg[2][4] += lreg[4] * rreg[2]; dreg[3][4] += lreg[4] * rreg[3];
+      dreg[2][5] += lreg[5] * rreg[2]; dreg[3][5] += lreg[5] * rreg[3];
+      dreg[2][6] += lreg[6] * rreg[2]; dreg[3][6] += lreg[6] * rreg[3];
+      dreg[2][7] += lreg[7] * rreg[2]; dreg[3][7] += lreg[7] * rreg[3];
      }
      __syncthreads();
 
@@ -348,14 +373,16 @@ __global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, c
     for(int_t j = 0; j < 4; ++j){
 #pragma unroll
      for(int_t i = 0; i < 8; ++i){
+#pragma unroll
       for(int_t l = 16; l > 0; l/=2){
        dreg[j][i] += __shfl_xor_sync(0xffffffff,dreg[j][i],l);
       }
      }
     }
-
+#if 1
     //Upload C fragments into the shared memory tile:
-    dbuf[wy*4 + lny][wx*8 + lnx] = dreg[lny][lnx];
+    dbuf[wy4 + lny][wx8 + lnx] = dreg[lny][lnx];
+#endif
     __syncthreads();
 
    }else{ //incomplete tile
@@ -394,7 +421,7 @@ __global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, c
 
    //printf("dbuf[%d,%d]=%e\n",lx,ly,dbuf[ly][lx]);
 
-   //Store the shared memory tile of matrix C in global memory:
+   //Store the shared memory tile of matrix C into global memory:
    dest[n_pos*m + m_pos] += dbuf[ly][lx];
 
    m_pos += gridDim.x*blockDim.x;
@@ -704,6 +731,8 @@ void print_device_properties(int device)
  if(cuerr == cudaSuccess){
   std::cout << "Properties of NVIDIA GPU " << device << std::endl;
   std::cout << " Compute capability: " << prop.major << "." << prop.minor << std::endl;
+  std::cout << " Register file size: " << prop.regsPerBlock << std::endl;
+  std::cout << " Shared memory size: " << prop.sharedMemPerBlock << std::endl;
  }else{
   std::cout << "#ERROR(bla::print_device_properties): Unable to get properties for device " << device << std::endl;
   assert(false);
