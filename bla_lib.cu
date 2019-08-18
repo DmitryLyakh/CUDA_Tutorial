@@ -215,11 +215,6 @@ __global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const
  using int_t = int; //either int or size_t
  __shared__ T lbuf[TILE_EXT_K][TILE_EXT_M], rbuf[TILE_EXT_N][TILE_EXT_K];
 
- const int_t by = blockDim.y; //blockDim.y = TILE_EXT_N
- const int_t bx = blockDim.x; //blockDim.x = TILE_EXT_M
- const int_t ly = threadIdx.y; //local thread index Y
- const int_t lx = threadIdx.x; //local thread index X
-
  for(int_t n_pos = blockIdx.y*blockDim.y; n_pos < n; n_pos += gridDim.y*blockDim.y){ //tile offset in Y dimension
 
   for(int_t m_pos = blockIdx.x*blockDim.x; m_pos < m; m_pos += gridDim.x*blockDim.x){ //tile offset in X dimension
@@ -230,30 +225,30 @@ __global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const
     int_t k_end = k_pos + TILE_EXT_K; if(k_end > k) k_end = k;
 
     //Load a tile of matrix A(m_pos:TILE_EXT_M, k_pos:TILE_EXT_K):
-    if(m_pos + lx < m){
-     for(int_t k_loc = k_pos + ly; k_loc < k_end; k_loc += by){
-      lbuf[k_loc-k_pos][lx] = left[k_loc*m + (m_pos+lx)];
+    if(m_pos + threadIdx.x < m){
+     for(int_t k_loc = k_pos + threadIdx.y; k_loc < k_end; k_loc += blockDim.y){
+      lbuf[k_loc-k_pos][threadIdx.x] = left[k_loc*m + (m_pos+threadIdx.x)];
      }
     }
 
     //Load a tile of matrix B(k_pos:TILE_EXT_K, n_pos:TILE_EXT_N):
-    if(n_pos + ly < n){
-     for(int_t k_loc = k_pos + lx; k_loc < k_end; k_loc += bx){
-      rbuf[ly][k_loc-k_pos] = right[(n_pos+ly)*k + k_loc];
+    if(n_pos + threadIdx.y < n){
+     for(int_t k_loc = k_pos + threadIdx.x; k_loc < k_end; k_loc += blockDim.x){
+      rbuf[threadIdx.y][k_loc-k_pos] = right[(n_pos+threadIdx.y)*k + k_loc];
      }
     }
     __syncthreads();
 
     //Multiply two loaded tiles to produce a tile of matrix C(m_pos:TILE_EXT_M,n_pos:TILE_EXT_N):
-    if(m_pos + lx < m && n_pos + ly < n){
+    if(m_pos + threadIdx.x < m && n_pos + threadIdx.y < n){
      if(k_end - k_pos == TILE_EXT_K){ //number of loop iterations is known at compile time: Unroll it
 #pragma unroll
       for(int_t l = 0; l < TILE_EXT_K; ++l){
-       tmp += lbuf[l][lx] * rbuf[ly][l];
+       tmp += lbuf[l][threadIdx.x] * rbuf[threadIdx.y][l];
       }
      }else{ //number of loop iterations is not known at compile time
       for(int_t l = 0; l < (k_end - k_pos); ++l){
-       tmp += lbuf[l][lx] * rbuf[ly][l];
+       tmp += lbuf[l][threadIdx.x] * rbuf[threadIdx.y][l];
       }
      }
     }
@@ -262,7 +257,8 @@ __global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const
    } //k_pos
 
    //Store element of the C matrix in global memory:
-   if(m_pos + lx < m && n_pos + ly < n) dest[(n_pos+ly)*m + (m_pos+lx)] += tmp;
+   if(m_pos + threadIdx.x < m && n_pos + threadIdx.y < n)
+    dest[(n_pos+threadIdx.y)*m + (m_pos+threadIdx.x)] += tmp;
 
   } //m_pos
 
