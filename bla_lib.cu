@@ -93,7 +93,7 @@ __global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T 
 template <typename T, int TILE_EXT_N = 16, int TILE_EXT_M = 16, int TILE_EXT_K = 64>
 __global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
 
-template <typename T, int TILE_EXT_N = 16, int TILE_EXT_M = 16, int TILE_EXT_K = 64>
+template <typename T, int TILE_EXT_N = 16, int TILE_EXT_M = 16, int TILE_EXT_K = 64, int FRAG_EXT_N = 4, int FRAG_EXT_M = 8>
 __global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
 
 template <typename T>
@@ -219,228 +219,190 @@ __global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const
  const int_t bx = blockDim.x; //blockDim.x = TILE_EXT_M
  const int_t ly = threadIdx.y; //local thread index Y
  const int_t lx = threadIdx.x; //local thread index X
- const int_t ty = blockIdx.y*blockDim.y + threadIdx.y; //global thread index Y
- const int_t tx = blockIdx.x*blockDim.x + threadIdx.x; //global thread index X
 
- int_t n_pos = ty;
- while(n_pos < n){ //n_pos is the position of the CUDA thread along the N dimension
+ for(int_t n_pos = blockIdx.y*blockDim.y; n_pos < n; n_pos += gridDim.y*blockDim.y){ //tile offset in Y dimension
 
-  int_t m_pos = tx;
-  while(m_pos < m){ //m_pos is the position of the CUDA thread along the M dimension
+  for(int_t m_pos = blockIdx.x*blockDim.x; m_pos < m; m_pos += gridDim.x*blockDim.x){ //tile offset in X dimension
 
-   T tmp = static_cast<T>(0.0);
-   int_t k_pos = 0;
-   while(k_pos < k){ //k_pos is the position of the CUDA thread along the K dimension
+   T tmp = static_cast<T>(0.0); //accumulator
+
+   for(int_t k_pos = 0; k_pos < k; k_pos += TILE_EXT_K){ //k_pos is the position of the CUDA thread along the K dimension
+    int_t k_end = k_pos + TILE_EXT_K; if(k_end > k) k_end = k;
 
     //Load a tile of matrix A(m_pos:TILE_EXT_M, k_pos:TILE_EXT_K):
-    int_t k_end = k_pos + TILE_EXT_K; if(k_end > k) k_end = k;
-    int_t k_loc = k_pos + ly;
-    int_t k_incr = by; if(n_pos - ly + by > n) k_incr = n - (n_pos - ly);
-    while(k_loc < k_end){
-     lbuf[k_loc-k_pos][lx] = left[k_loc*m + m_pos];
-     k_loc += k_incr;
+    if(m_pos + lx < m){
+     for(int_t k_loc = k_pos + ly; k_loc < k_end; k_loc += by){
+      lbuf[k_loc-k_pos][lx] = left[k_loc*m + (m_pos+lx)];
+     }
     }
 
     //Load a tile of matrix B(k_pos:TILE_EXT_K, n_pos:TILE_EXT_N):
-    k_loc = k_pos + lx;
-    k_incr = bx; if(m_pos - lx + bx > m) k_incr = m - (m_pos - lx);
-    while(k_loc < k_end){
-     rbuf[ly][k_loc-k_pos] = right[n_pos*k + k_loc];
-     k_loc += k_incr;
+    if(n_pos + ly < n){
+     for(int_t k_loc = k_pos + lx; k_loc < k_end; k_loc += bx){
+      rbuf[ly][k_loc-k_pos] = right[(n_pos+ly)*k + k_loc];
+     }
     }
     __syncthreads();
 
     //Multiply two loaded tiles to produce a tile of matrix C(m_pos:TILE_EXT_M,n_pos:TILE_EXT_N):
-    if(k_end - k_pos == TILE_EXT_K){ //number of loop iterations is known at compile time: Unroll it
+    if(m_pos + lx < m && n_pos + ly < n){
+     if(k_end - k_pos == TILE_EXT_K){ //number of loop iterations is known at compile time: Unroll it
 #pragma unroll
-     for(int_t i = 0; i < TILE_EXT_K; ++i){
-      tmp += lbuf[i][lx] * rbuf[ly][i];
-     }
-    }else{ //number of loop iterations is not known at compile time
-     for(int_t i = 0; i < (k_end - k_pos); ++i){
-      tmp += lbuf[i][lx] * rbuf[ly][i];
+      for(int_t l = 0; l < TILE_EXT_K; ++l){
+       tmp += lbuf[l][lx] * rbuf[ly][l];
+      }
+     }else{ //number of loop iterations is not known at compile time
+      for(int_t l = 0; l < (k_end - k_pos); ++l){
+       tmp += lbuf[l][lx] * rbuf[ly][l];
+      }
      }
     }
     __syncthreads();
 
-    k_pos += TILE_EXT_K;
-   }
+   } //k_pos
 
-   //Save the computed element of matrix C:
-   dest[n_pos*m + m_pos] += tmp;
+   //Store element of the C matrix in global memory:
+   if(m_pos + lx < m && n_pos + ly < n) dest[(n_pos+ly)*m + (m_pos+lx)] += tmp;
 
-   m_pos += gridDim.x*blockDim.x;
-  }
+  } //m_pos
 
-  n_pos += gridDim.y*blockDim.y;
- }
+ } //n_pos
  return;
 }
 
 
-template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K>
+template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K, int FRAG_EXT_N, int FRAG_EXT_M>
 __global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
 {
  using int_t = int; //either int or size_t
- __shared__ T lbuf[TILE_EXT_K][TILE_EXT_M], rbuf[TILE_EXT_N][TILE_EXT_K], dbuf[TILE_EXT_N][TILE_EXT_M];
- T lreg[8], rreg[4], dreg[4][8];
+ __shared__ T lbuf[TILE_EXT_K][TILE_EXT_M], rbuf[TILE_EXT_N][TILE_EXT_K];
+ T lreg[FRAG_EXT_M], rreg[FRAG_EXT_N], dreg[FRAG_EXT_N][FRAG_EXT_M];
 
- const int_t by = blockDim.y; //blockDim.y = TILE_EXT_N
- const int_t bx = blockDim.x; //blockDim.x = TILE_EXT_M
+ const int_t by = blockDim.y; //blockDim.y
+ const int_t bx = blockDim.x; //blockDim.x
  const int_t ly = threadIdx.y; //local thread index Y
  const int_t lx = threadIdx.x; //local thread index X
- const int_t ty = blockIdx.y*blockDim.y + threadIdx.y; //global thread index Y
- const int_t tx = blockIdx.x*blockDim.x + threadIdx.x; //global thread index X
- const int_t wy = ((threadIdx.y*blockDim.x + threadIdx.x) / warpSize) / (TILE_EXT_M/8); //local warp index Y
- const int_t wx = ((threadIdx.y*blockDim.x + threadIdx.x) / warpSize) % (TILE_EXT_M/8); //local warp index X
- const int_t ln = (threadIdx.y*blockDim.x + threadIdx.x) % warpSize; //lane index inside a warp
- const int_t lny = ln / 8; //Y position inside warp fragment
- const int_t lnx = ln % 8; //X position inside warp fragment
- const int_t wy4 = wy*4;
- const int_t wx8 = wx*8;
+ const int_t wy = ((threadIdx.y*blockDim.x + threadIdx.x) / warpSize) / (TILE_EXT_M/FRAG_EXT_M); //local warp index Y
+ const int_t wx = ((threadIdx.y*blockDim.x + threadIdx.x) / warpSize) % (TILE_EXT_M/FRAG_EXT_M); //local warp index X
+ const int_t ln = (threadIdx.y*blockDim.x + threadIdx.x) % warpSize; //thread lane index inside a warp
+ const int_t lny = ln / FRAG_EXT_M; //Y position inside warp fragment
+ const int_t lnx = ln % FRAG_EXT_M; //X position inside warp fragment
+ const int_t wyb = wy * FRAG_EXT_N;
+ const int_t wxb = wx * FRAG_EXT_M;
 
- int_t n_pos = ty;
- while(n_pos < n){ //n_pos is the position of the CUDA thread along the N dimension
+ for(int_t n_pos = blockIdx.y*blockDim.y; n_pos < n; n_pos += gridDim.y*blockDim.y){ //tile offset in Y dimension
 
-  int_t m_pos = tx;
-  while(m_pos < m){ //m_pos is the position of the CUDA thread along the M dimension
+  for(int_t m_pos = blockIdx.x*blockDim.x; m_pos < m; m_pos += gridDim.x*blockDim.x){ //tile offset in X dimension
 
-   //Set a tile of C to zero in shared memory and registers:
-   dbuf[ly][lx] = static_cast<T>(0.0);
+   //Initialize C accumulators to zero:
 #pragma unroll
-   for(int_t j = 0; j < 4; ++j){
+   for(int_t j = 0; j < FRAG_EXT_N; ++j){
 #pragma unroll
-    for(int_t i = 0; i < 8; ++i){
+    for(int_t i = 0; i < FRAG_EXT_M; ++i){
      dreg[j][i] = static_cast<T>(0.0);
     }
    }
 
-   if((m_pos - lx + TILE_EXT_M <= m) && (n_pos - ly + TILE_EXT_N) <= n){ //complete tile (TILE_EXT_N * TILE_EXT_M * TILE_EXT_K)
+   if((m_pos + TILE_EXT_M <= m) && (n_pos + TILE_EXT_N <= n)){ //complete tile (TILE_EXT_N * TILE_EXT_M)
 
-    int_t k_pos = 0;
-    while(k_pos < k){ //k_pos is the position of the CUDA thread along the K dimension
+    for(int_t k_pos = 0; k_pos < k; k_pos += TILE_EXT_K){ //k_pos is the position of the CUDA thread along the K dimension
+     int_t k_end = k_pos + TILE_EXT_K; if(k_end > k) k_end = k;
 
      //Load a tile of matrix A(m_pos:TILE_EXT_M, k_pos:TILE_EXT_K):
-     int_t k_end = k_pos + TILE_EXT_K; if(k_end > k) k_end = k;
-     int_t k_loc = k_pos + ly;
-     int_t k_incr = by; if(n_pos - ly + by > n) k_incr = n - (n_pos - ly);
-#if 1
-     while(k_loc < k_end){
-      lbuf[k_loc-k_pos][lx] = left[k_loc*m + m_pos];
-      k_loc += k_incr;
+     for(int_t k_loc = k_pos + ly; k_loc < k_end; k_loc += by){
+      lbuf[k_loc-k_pos][lx] = left[k_loc*m + (m_pos+lx)];
      }
-#endif
 
      //Load a tile of matrix B(k_pos:TILE_EXT_K, n_pos:TILE_EXT_N):
-     k_loc = k_pos + lx;
-     k_incr = bx; if(m_pos - lx + bx > m) k_incr = m - (m_pos - lx);
-#if 1
-     while(k_loc < k_end){
-      rbuf[ly][k_loc-k_pos] = right[n_pos*k + k_loc];
-      k_loc += k_incr;
+     for(int_t k_loc = k_pos + lx; k_loc < k_end; k_loc += bx){
+      rbuf[ly][k_loc-k_pos] = right[(n_pos+ly)*k + k_loc];
      }
-#endif
      __syncthreads();
 
      //Multiply two loaded tiles to produce a tile of matrix C(m_pos:TILE_EXT_M,n_pos:TILE_EXT_N):
-     for(int_t l = ln; l < (k_end - k_pos); l += 32){
+     for(int_t l = ln; l < (k_end - k_pos); l += warpSize){
       //Load fragments of shared memory tiles into registers:
-      rreg[0] = rbuf[wy4 + 0][l];
-      rreg[1] = rbuf[wy4 + 1][l];
-      rreg[2] = rbuf[wy4 + 2][l];
-      rreg[3] = rbuf[wy4 + 3][l];
-      lreg[0] = lbuf[l][wx8 + 0];
-      lreg[1] = lbuf[l][wx8 + 1];
-      lreg[2] = lbuf[l][wx8 + 2];
-      lreg[3] = lbuf[l][wx8 + 3];
-      lreg[4] = lbuf[l][wx8 + 4];
-      lreg[5] = lbuf[l][wx8 + 5];
-      lreg[6] = lbuf[l][wx8 + 6];
-      lreg[7] = lbuf[l][wx8 + 7];
+#pragma unroll
+      for(int_t j = 0; j < FRAG_EXT_N; ++j) rreg[j] = rbuf[wyb + j][l];
+#pragma unroll
+      for(int_t j = 0; j < FRAG_EXT_M; ++j) lreg[j] = lbuf[l][wxb + j];
       //Compute outer product of tile fragments in registers:
-      dreg[0][0] += lreg[0] * rreg[0]; dreg[1][0] += lreg[0] * rreg[1];
-      dreg[0][1] += lreg[1] * rreg[0]; dreg[1][1] += lreg[1] * rreg[1];
-      dreg[0][2] += lreg[2] * rreg[0]; dreg[1][2] += lreg[2] * rreg[1];
-      dreg[0][3] += lreg[3] * rreg[0]; dreg[1][3] += lreg[3] * rreg[1];
-      dreg[0][4] += lreg[4] * rreg[0]; dreg[1][4] += lreg[4] * rreg[1];
-      dreg[0][5] += lreg[5] * rreg[0]; dreg[1][5] += lreg[5] * rreg[1];
-      dreg[0][6] += lreg[6] * rreg[0]; dreg[1][6] += lreg[6] * rreg[1];
-      dreg[0][7] += lreg[7] * rreg[0]; dreg[1][7] += lreg[7] * rreg[1];
-      dreg[2][0] += lreg[0] * rreg[2]; dreg[3][0] += lreg[0] * rreg[3];
-      dreg[2][1] += lreg[1] * rreg[2]; dreg[3][1] += lreg[1] * rreg[3];
-      dreg[2][2] += lreg[2] * rreg[2]; dreg[3][2] += lreg[2] * rreg[3];
-      dreg[2][3] += lreg[3] * rreg[2]; dreg[3][3] += lreg[3] * rreg[3];
-      dreg[2][4] += lreg[4] * rreg[2]; dreg[3][4] += lreg[4] * rreg[3];
-      dreg[2][5] += lreg[5] * rreg[2]; dreg[3][5] += lreg[5] * rreg[3];
-      dreg[2][6] += lreg[6] * rreg[2]; dreg[3][6] += lreg[6] * rreg[3];
-      dreg[2][7] += lreg[7] * rreg[2]; dreg[3][7] += lreg[7] * rreg[3];
+#pragma unroll
+      for(int_t j = 0; j < FRAG_EXT_N; ++j){
+#pragma unroll
+       for(int_t i = 0; i < FRAG_EXT_M; ++i){
+        dreg[j][i] += lreg[i] * rreg[j];
+       }
+      }
      }
      __syncthreads();
 
-     k_pos += TILE_EXT_K;
-    }
+    } //k_pos
 
     //Perform reduction of the C fragment within each warp:
 #pragma unroll
-    for(int_t j = 0; j < 4; ++j){
+    for(int_t j = 0; j < FRAG_EXT_N; ++j){
 #pragma unroll
-     for(int_t i = 0; i < 8; ++i){
+     for(int_t i = 0; i < FRAG_EXT_M; ++i){
 #pragma unroll
-      for(int_t l = 16; l > 0; l/=2){
-       dreg[j][i] += __shfl_xor_sync(0xffffffff,dreg[j][i],l);
-      }
+      dreg[j][i] += __shfl_xor_sync(0xffffffff,dreg[j][i],16);
+      dreg[j][i] += __shfl_xor_sync(0xffffffff,dreg[j][i],8);
+      dreg[j][i] += __shfl_xor_sync(0xffffffff,dreg[j][i],4);
+      dreg[j][i] += __shfl_xor_sync(0xffffffff,dreg[j][i],2);
+      dreg[j][i] += __shfl_xor_sync(0xffffffff,dreg[j][i],1);
      }
     }
-#if 1
-    //Upload C fragments into the shared memory tile:
-    dbuf[wy4 + lny][wx8 + lnx] = dreg[lny][lnx];
-#endif
-    __syncthreads();
+
+    //Upload C fragments into C matrix in global memory:
+    dest[(n_pos + wyb + lny)*m + (m_pos + wxb + lnx)] = dreg[lny][lnx];
 
    }else{ //incomplete tile
 
-    int_t k_pos = 0;
-    while(k_pos < k){ //k_pos is the position of the CUDA thread along the K dimension
+    T tmp = static_cast<T>(0.0); //accumulator
+
+    for(int_t k_pos = 0; k_pos < k; k_pos += TILE_EXT_K){ //k_pos is the position of the CUDA thread along the K dimension
+     int_t k_end = k_pos + TILE_EXT_K; if(k_end > k) k_end = k;
 
      //Load a tile of matrix A(m_pos:TILE_EXT_M, k_pos:TILE_EXT_K):
-     int_t k_end = k_pos + TILE_EXT_K; if(k_end > k) k_end = k;
-     int_t k_loc = k_pos + ly;
-     int_t k_incr = by; if(n_pos - ly + by > n) k_incr = n - (n_pos - ly);
-     while(k_loc < k_end){
-      lbuf[k_loc-k_pos][lx] = left[k_loc*m + m_pos];
-      k_loc += k_incr;
+     if(m_pos + lx < m){
+      for(int_t k_loc = k_pos + ly; k_loc < k_end; k_loc += by){
+       lbuf[k_loc-k_pos][lx] = left[k_loc*m + (m_pos+lx)];
+      }
      }
 
      //Load a tile of matrix B(k_pos:TILE_EXT_K, n_pos:TILE_EXT_N):
-     k_loc = k_pos + lx;
-     k_incr = bx; if(m_pos - lx + bx > m) k_incr = m - (m_pos - lx);
-     while(k_loc < k_end){
-      rbuf[ly][k_loc-k_pos] = right[n_pos*k + k_loc];
-      k_loc += k_incr;
+     if(n_pos + ly < n){
+      for(int_t k_loc = k_pos + lx; k_loc < k_end; k_loc += bx){
+       rbuf[ly][k_loc-k_pos] = right[(n_pos+ly)*k + k_loc];
+      }
      }
      __syncthreads();
 
      //Multiply two loaded tiles to produce a tile of matrix C(m_pos:TILE_EXT_M,n_pos:TILE_EXT_N):
-     for(int_t l = 0; l < (k_end - k_pos); ++l){
-      dbuf[ly][lx] += lbuf[l][lx] * rbuf[ly][l];
+     if(m_pos + lx < m && n_pos + ly < n){
+      if(k_end - k_pos == TILE_EXT_K){ //number of loop iterations is known at compile time: Unroll it
+#pragma unroll
+       for(int_t l = 0; l < TILE_EXT_K; ++l){
+        tmp += lbuf[l][lx] * rbuf[ly][l];
+       }
+      }else{ //number of loop iterations is not known at compile time
+       for(int_t l = 0; l < (k_end - k_pos); ++l){
+        tmp += lbuf[l][lx] * rbuf[ly][l];
+       }
+      }
      }
      __syncthreads();
 
-     k_pos += TILE_EXT_K;
-    }
+    } //k_pos
+
+    //Store in C matrix into global memory:
+    if(m_pos + lx < m && n_pos + ly < n) dest[(n_pos+ly)*m + (m_pos+lx)] += tmp;
 
    }
 
-   //printf("dbuf[%d,%d]=%e\n",lx,ly,dbuf[ly][lx]);
+  } //m_pos
 
-   //Store the shared memory tile of matrix C into global memory:
-   dest[n_pos*m + m_pos] += dbuf[ly][lx];
-
-   m_pos += gridDim.x*blockDim.x;
-  }
-
-  n_pos += gridDim.y*blockDim.y;
- }
+ } //n_pos
  return;
 }
 
