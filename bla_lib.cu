@@ -275,6 +275,7 @@ __global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, c
 {
  using int_t = int; //either int or size_t
  __shared__ T lbuf[TILE_EXT_K][TILE_EXT_M], rbuf[TILE_EXT_N][TILE_EXT_K];
+ T lreg[4], rreg[4], dreg[4][4]; //accumulator
 
  for(int_t n_pos = blockIdx.y*TILE_EXT_N; n_pos < n; n_pos += gridDim.y*TILE_EXT_N){ //tile offset in Y dimension
   int_t n_end = n_pos + TILE_EXT_N; if(n_end > n) n_end = n;
@@ -282,9 +283,16 @@ __global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, c
   for(int_t m_pos = blockIdx.x*TILE_EXT_M; m_pos < m; m_pos += gridDim.x*TILE_EXT_M){ //tile offset in X dimension
    int_t m_end = m_pos + TILE_EXT_M; if(m_end > m) m_end = m;
 
-   T dreg[4][4] = {static_cast<T>(0.0)}; //accumulator
-   T rreg[4] = {static_cast<T>(0.0)};
-   T lreg[4] = {static_cast<T>(0.0)};
+   //Initialize registers to zero:
+#pragma unroll
+   for(int_t j = 0; j < 4; ++j){
+    lreg[j] = static_cast<T>(0.0);
+    rreg[j] = static_cast<T>(0.0);
+#pragma unroll
+    for(int_t i = 0; i < 4; ++i){
+     dreg[j][i] = static_cast<T>(0.0);
+    }
+   }
 
    for(int_t k_pos = 0; k_pos < k; k_pos += TILE_EXT_K){ //k_pos is the position of the CUDA thread along the K dimension
     int_t k_end = k_pos + TILE_EXT_K; if(k_end > k) k_end = k;
