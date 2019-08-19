@@ -26,21 +26,21 @@ void use_bla()
 {
  std::cout << "Let's try to use BLA library ..." << std::endl;
  //Create matrix A:
- bla::Matrix<float> A(1024,2048);
+ bla::Matrix<float> A(1000,2000);
  //Allocate matrix A body on Host:
  A.allocateBody(-1,bla::MemKind::Pinned);
  //Set matrix A body to some non-trivial value on Host:
  A.setBodyHost();
 
  //Create matrix B:
- bla::Matrix<float> B(2048,2048);
+ bla::Matrix<float> B(2000,3000);
  //Allocate matrix B body on Host:
  B.allocateBody(-1,bla::MemKind::Pinned);
  //Set matrix B body to some non-trivial value on Host:
  B.setBodyHost();
 
  //Create matrix C:
- bla::Matrix<float> C(1024,2048);
+ bla::Matrix<float> C(1000,3000);
  //Allocate matrix C body on GPU#0:
  C.allocateBody(0,bla::MemKind::Regular);
 

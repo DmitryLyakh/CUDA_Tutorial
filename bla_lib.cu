@@ -275,7 +275,6 @@ __global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, c
 {
  using int_t = int; //either int or size_t
  __shared__ T lbuf[TILE_EXT_K][TILE_EXT_M], rbuf[TILE_EXT_N][TILE_EXT_K];
- T lreg[4], rreg[4], dreg[4][4]; //accumulator
 
  for(int_t n_pos = blockIdx.y*TILE_EXT_N; n_pos < n; n_pos += gridDim.y*TILE_EXT_N){ //tile offset in Y dimension
   int_t n_end = n_pos + TILE_EXT_N; if(n_end > n) n_end = n;
@@ -283,62 +282,104 @@ __global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, c
   for(int_t m_pos = blockIdx.x*TILE_EXT_M; m_pos < m; m_pos += gridDim.x*TILE_EXT_M){ //tile offset in X dimension
    int_t m_end = m_pos + TILE_EXT_M; if(m_end > m) m_end = m;
 
-   //Initialize registers to zero:
-#pragma unroll
-   for(int_t j = 0; j < 4; ++j){
-    lreg[j] = static_cast<T>(0.0);
-    rreg[j] = static_cast<T>(0.0);
-#pragma unroll
-    for(int_t i = 0; i < 4; ++i){
-     dreg[j][i] = static_cast<T>(0.0);
-    }
-   }
+   if((m_end - m_pos == TILE_EXT_M) && (n_end - n_pos == TILE_EXT_N)){ //complete tile C(TILE_EXT_M,TILE_EXT_N)
 
-   for(int_t k_pos = 0; k_pos < k; k_pos += TILE_EXT_K){ //k_pos is the position of the CUDA thread along the K dimension
-    int_t k_end = k_pos + TILE_EXT_K; if(k_end > k) k_end = k;
+    //Initialize registers to zero:
+    T dreg[4][4] = {static_cast<T>(0.0)};
+    T rreg[4] = {static_cast<T>(0.0)};
+    T lreg[4] = {static_cast<T>(0.0)};
 
-    //Load a tile of matrix A(m_pos:TILE_EXT_M, k_pos:TILE_EXT_K):
-    for(int_t m_loc = m_pos + threadIdx.x; m_loc < m_end; m_loc += blockDim.x){
-     for(int_t k_loc = k_pos + threadIdx.y; k_loc < k_end; k_loc += blockDim.y){
-      lbuf[k_loc - k_pos][m_loc - m_pos] = left[k_loc*m + m_loc];
+    for(int_t k_pos = 0; k_pos < k; k_pos += TILE_EXT_K){ //k_pos is the position of the CUDA thread along the K dimension
+     int_t k_end = k_pos + TILE_EXT_K; if(k_end > k) k_end = k;
+
+     //Load a tile of matrix A(m_pos:TILE_EXT_M, k_pos:TILE_EXT_K):
+     for(int_t m_loc = m_pos + threadIdx.x; m_loc < m_end; m_loc += blockDim.x){
+      for(int_t k_loc = k_pos + threadIdx.y; k_loc < k_end; k_loc += blockDim.y){
+       lbuf[k_loc - k_pos][m_loc - m_pos] = left[k_loc*m + m_loc];
+      }
      }
-    }
 
-    //Load a tile of matrix B(k_pos:TILE_EXT_K, n_pos:TILE_EXT_N):
-    for(int_t n_loc = n_pos + threadIdx.y; n_loc < n_end; n_loc += blockDim.y){
-     for(int_t k_loc = k_pos + threadIdx.x; k_loc < k_end; k_loc += blockDim.x){
-      rbuf[n_loc - n_pos][k_loc - k_pos] = right[n_loc*k + k_loc];
+     //Load a tile of matrix B(k_pos:TILE_EXT_K, n_pos:TILE_EXT_N):
+     for(int_t n_loc = n_pos + threadIdx.y; n_loc < n_end; n_loc += blockDim.y){
+      for(int_t k_loc = k_pos + threadIdx.x; k_loc < k_end; k_loc += blockDim.x){
+       rbuf[n_loc - n_pos][k_loc - k_pos] = right[n_loc*k + k_loc];
+      }
      }
-    }
-    __syncthreads();
+     __syncthreads();
 
-    //Multiply two loaded tiles to produce a tile of matrix C(m_pos:TILE_EXT_M,n_pos:TILE_EXT_N):
-    //if(k_end - k_pos == TILE_EXT_K){
+     //Multiply two loaded tiles to produce a tile of matrix C(m_pos:TILE_EXT_M,n_pos:TILE_EXT_N):
+     if(k_end - k_pos == TILE_EXT_K){
 #pragma unroll
-     for(int_t l = 0; l < TILE_EXT_K; ++l){
-      //for(int_t i = 0, j = threadIdx.y; j < n_end - n_pos; j += blockDim.y, i++) rreg[i] = rbuf[j][l];
-      rreg[0] = rbuf[threadIdx.y + blockDim.y*0][l];
-      rreg[1] = rbuf[threadIdx.y + blockDim.y*1][l];
-      rreg[2] = rbuf[threadIdx.y + blockDim.y*2][l];
-      rreg[3] = rbuf[threadIdx.y + blockDim.y*3][l];
-      //for(int_t i = 0, j = threadIdx.x; j < m_end - m_pos; j += blockDim.x, i++) lreg[i] = lbuf[l][j];
-      lreg[0] = lbuf[l][threadIdx.x + blockDim.x*0];
-      lreg[1] = lbuf[l][threadIdx.x + blockDim.x*1];
-      lreg[2] = lbuf[l][threadIdx.x + blockDim.x*2];
-      lreg[3] = lbuf[l][threadIdx.x + blockDim.x*3];
+      for(int_t l = 0; l < TILE_EXT_K; ++l){
 #pragma unroll
-      for(int_t j = 0; j < 4; ++j){
+       for(int_t j = 0; j < 4; ++j) rreg[j] = rbuf[threadIdx.y + blockDim.y*j][l];
 #pragma unroll
-       for(int_t i = 0; i < 4; ++i){
-        dreg[j][i] += lreg[i] * rreg[j];
+       for(int_t j = 0; j < 4; ++j) lreg[j] = lbuf[l][threadIdx.x + blockDim.x*j];
+#pragma unroll
+       for(int_t j = 0; j < 4; ++j){
+#pragma unroll
+        for(int_t i = 0; i < 4; ++i){
+         dreg[j][i] += lreg[i] * rreg[j];
+        }
+       }
+      }
+     }else{
+      for(int_t l = 0; l < (k_end - k_pos); ++l){
+#pragma unroll
+       for(int_t j = 0; j < 4; ++j) rreg[j] = rbuf[threadIdx.y + blockDim.y*j][l];
+#pragma unroll
+       for(int_t j = 0; j < 4; ++j) lreg[j] = lbuf[l][threadIdx.x + blockDim.x*j];
+#pragma unroll
+       for(int_t j = 0; j < 4; ++j){
+#pragma unroll
+        for(int_t i = 0; i < 4; ++i){
+         dreg[j][i] += lreg[i] * rreg[j];
+        }
        }
       }
      }
-    /*
-    }else{
+     __syncthreads();
+
+    } //k_pos
+
+    //Store elements of the C matrix in global memory:
+#pragma unroll
+    for(int_t j = 0; j < 4; ++j){
+#pragma unroll
+     for(int_t i = 0; i < 4; ++i){
+      dest[(n_pos + threadIdx.y + blockDim.y*j)*m + (m_pos + threadIdx.x + blockDim.x*i)] += dreg[j][i];
+     }
+    }
+
+   }else{ //incomplete tile of C
+
+    //Initialize registers to zero:
+    T dreg[4][4] = {static_cast<T>(0.0)};
+    T rreg[4] = {static_cast<T>(0.0)};
+    T lreg[4] = {static_cast<T>(0.0)};
+
+    for(int_t k_pos = 0; k_pos < k; k_pos += TILE_EXT_K){ //k_pos is the position of the CUDA thread along the K dimension
+     int_t k_end = k_pos + TILE_EXT_K; if(k_end > k) k_end = k;
+
+     //Load a tile of matrix A(m_pos:TILE_EXT_M, k_pos:TILE_EXT_K):
+     for(int_t m_loc = m_pos + threadIdx.x; m_loc < m_end; m_loc += blockDim.x){
+      for(int_t k_loc = k_pos + threadIdx.y; k_loc < k_end; k_loc += blockDim.y){
+       lbuf[k_loc - k_pos][m_loc - m_pos] = left[k_loc*m + m_loc];
+      }
+     }
+
+     //Load a tile of matrix B(k_pos:TILE_EXT_K, n_pos:TILE_EXT_N):
+     for(int_t n_loc = n_pos + threadIdx.y; n_loc < n_end; n_loc += blockDim.y){
+      for(int_t k_loc = k_pos + threadIdx.x; k_loc < k_end; k_loc += blockDim.x){
+       rbuf[n_loc - n_pos][k_loc - k_pos] = right[n_loc*k + k_loc];
+      }
+     }
+     __syncthreads();
+
+     //Multiply two loaded tiles to produce a tile of matrix C(m_pos:TILE_EXT_M,n_pos:TILE_EXT_N):
      for(int_t l = 0; l < (k_end - k_pos); ++l){
-      //for(int_t i = 0, j = threadIdx.y; j < n_end - n_pos; j += blockDim.y, i++) rreg[i] = rbuf[j][l];
-      //for(int_t i = 0, j = threadIdx.x; j < m_end - m_pos; j += blockDim.x, i++) lreg[i] = lbuf[l][j];
+      for(int_t i = 0, j = threadIdx.y; j < n_end - n_pos; j += blockDim.y, i++) rreg[i] = rbuf[j][l];
+      for(int_t i = 0, j = threadIdx.x; j < m_end - m_pos; j += blockDim.x, i++) lreg[i] = lbuf[l][j];
 #pragma unroll
       for(int_t j = 0; j < 4; ++j){
 #pragma unroll
@@ -347,34 +388,18 @@ __global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, c
        }
       }
      }
-    } */
-    __syncthreads();
+     __syncthreads();
 
-   } //k_pos
+    } //k_pos
 
-   //Store element of the C matrix in global memory:
-   /*
-   for(int_t j = 0, n_loc = n_pos + threadIdx.y; n_loc < n_end; n_loc += blockDim.y, j++){
-    for(int_t i = 0, m_loc = m_pos + threadIdx.x; m_loc < m_end; m_loc += blockDim.x, i++){
-     dest[n_loc*m + m_loc] += dreg[j][i];
+    //Store element of the C matrix in global memory:
+    for(int_t j = 0, n_loc = n_pos + threadIdx.y; n_loc < n_end; n_loc += blockDim.y, j++){
+     for(int_t i = 0, m_loc = m_pos + threadIdx.x; m_loc < m_end; m_loc += blockDim.x, i++){
+      dest[n_loc*m + m_loc] += dreg[j][i];
+     }
     }
-   } */
-   dest[(n_pos + threadIdx.y + blockDim.y*0)*m + (m_pos + threadIdx.x + blockDim.x*0)] += dreg[0][0];
-   dest[(n_pos + threadIdx.y + blockDim.y*0)*m + (m_pos + threadIdx.x + blockDim.x*1)] += dreg[0][1];
-   dest[(n_pos + threadIdx.y + blockDim.y*0)*m + (m_pos + threadIdx.x + blockDim.x*2)] += dreg[0][2];
-   dest[(n_pos + threadIdx.y + blockDim.y*0)*m + (m_pos + threadIdx.x + blockDim.x*3)] += dreg[0][3];
-   dest[(n_pos + threadIdx.y + blockDim.y*1)*m + (m_pos + threadIdx.x + blockDim.x*0)] += dreg[1][0];
-   dest[(n_pos + threadIdx.y + blockDim.y*1)*m + (m_pos + threadIdx.x + blockDim.x*1)] += dreg[1][1];
-   dest[(n_pos + threadIdx.y + blockDim.y*1)*m + (m_pos + threadIdx.x + blockDim.x*2)] += dreg[1][2];
-   dest[(n_pos + threadIdx.y + blockDim.y*1)*m + (m_pos + threadIdx.x + blockDim.x*3)] += dreg[1][3];
-   dest[(n_pos + threadIdx.y + blockDim.y*2)*m + (m_pos + threadIdx.x + blockDim.x*0)] += dreg[2][0];
-   dest[(n_pos + threadIdx.y + blockDim.y*2)*m + (m_pos + threadIdx.x + blockDim.x*1)] += dreg[2][1];
-   dest[(n_pos + threadIdx.y + blockDim.y*2)*m + (m_pos + threadIdx.x + blockDim.x*2)] += dreg[2][2];
-   dest[(n_pos + threadIdx.y + blockDim.y*2)*m + (m_pos + threadIdx.x + blockDim.x*3)] += dreg[2][3];
-   dest[(n_pos + threadIdx.y + blockDim.y*3)*m + (m_pos + threadIdx.x + blockDim.x*0)] += dreg[3][0];
-   dest[(n_pos + threadIdx.y + blockDim.y*3)*m + (m_pos + threadIdx.x + blockDim.x*1)] += dreg[3][1];
-   dest[(n_pos + threadIdx.y + blockDim.y*3)*m + (m_pos + threadIdx.x + blockDim.x*2)] += dreg[3][2];
-   dest[(n_pos + threadIdx.y + blockDim.y*3)*m + (m_pos + threadIdx.x + blockDim.x*3)] += dreg[3][3];
+
+   }
 
   } //m_pos
 
