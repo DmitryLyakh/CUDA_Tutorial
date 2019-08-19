@@ -9,7 +9,7 @@ CXX_LIB = -lstdc++
 
 CUDA_COMP = nvcc
 CUDA_HOST = /usr/bin/g++
-CUDA_ARCH = sm_50
+CUDA_ARCH = sm_35
 CUDA_INC = -I/usr/local/cuda/include
 CUDA_LIB = -L/usr/local/cuda/lib64 -lcublas -lcudart
 CUDA_FLAGS_DEV = --compile -ccbin $(CUDA_HOST) -std=c++11 -arch=$(CUDA_ARCH) -O3 -m64 -w --resource-usage --ptxas-options=-v -Xcompiler -fPIC -D_FORCE_INLINES -g -G
