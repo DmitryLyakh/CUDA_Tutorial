@@ -93,8 +93,11 @@ __global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T 
 template <typename T, int TILE_EXT_N = 16, int TILE_EXT_M = 16, int TILE_EXT_K = 64>
 __global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
 
-template <typename T, int TILE_EXT_N = 16, int TILE_EXT_M = 16, int TILE_EXT_K = 64, int FRAG_EXT_N = 4, int FRAG_EXT_M = 8>
+template <typename T, int TILE_EXT_N = 64, int TILE_EXT_M = 64, int TILE_EXT_K = 16>
 __global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
+
+template <typename T, int TILE_EXT_N = 16, int TILE_EXT_M = 16, int TILE_EXT_K = 64, int FRAG_EXT_N = 4, int FRAG_EXT_M = 8>
+__global__ void gpu_gemm_sh_reg_old_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
 
 template <typename T>
 __global__ void gpu_gemm_tn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
@@ -267,8 +270,87 @@ __global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const
 }
 
 
-template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K, int FRAG_EXT_N, int FRAG_EXT_M>
+template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K>
 __global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+{
+ using int_t = int; //either int or size_t
+ __shared__ T lbuf[TILE_EXT_K][TILE_EXT_M], rbuf[TILE_EXT_N][TILE_EXT_K];
+
+ for(int_t n_pos = blockIdx.y*TILE_EXT_N; n_pos < n; n_pos += gridDim.y*TILE_EXT_N){ //tile offset in Y dimension
+  int_t n_end = n_pos + TILE_EXT_N; if(n_end > n) n_end = n;
+
+  for(int_t m_pos = blockIdx.x*TILE_EXT_M; m_pos < m; m_pos += gridDim.x*TILE_EXT_M){ //tile offset in X dimension
+   int_t m_end = m_pos + TILE_EXT_M; if(m_end > m) m_end = m;
+
+   T dreg[4][4] = {static_cast<T>(0.0)}; //accumulator
+   T rreg[4] = {static_cast<T>(0.0)};
+   T lreg[4] = {static_cast<T>(0.0)};
+
+   for(int_t k_pos = 0; k_pos < k; k_pos += TILE_EXT_K){ //k_pos is the position of the CUDA thread along the K dimension
+    int_t k_end = k_pos + TILE_EXT_K; if(k_end > k) k_end = k;
+
+    //Load a tile of matrix A(m_pos:TILE_EXT_M, k_pos:TILE_EXT_K):
+    for(int_t m_loc = m_pos + threadIdx.x; m_loc < m_end; m_loc += blockDim.x){
+     for(int_t k_loc = k_pos + threadIdx.y; k_loc < k_end; k_loc += blockDim.y){
+      lbuf[k_loc - k_pos][m_loc - m_pos] = left[k_loc*m + m_loc];
+     }
+    }
+
+    //Load a tile of matrix B(k_pos:TILE_EXT_K, n_pos:TILE_EXT_N):
+    for(int_t n_loc = n_pos + threadIdx.y; n_loc < n_end; n_loc += blockDim.y){
+     for(int_t k_loc = k_pos + threadIdx.x; k_loc < k_end; k_loc += blockDim.x){
+      rbuf[n_loc - n_pos][k_loc - k_pos] = right[n_loc*k + k_loc];
+     }
+    }
+    __syncthreads();
+
+    //Multiply two loaded tiles to produce a tile of matrix C(m_pos:TILE_EXT_M,n_pos:TILE_EXT_N):
+    if(k_end - k_pos == TILE_EXT_K){
+#pragma unroll
+     for(int_t l = 0; l < TILE_EXT_K; ++l){
+      for(int_t i = 0, j = threadIdx.y; j < n_end - n_pos; j += blockDim.y, i++) rreg[i] = rbuf[j][l];
+      for(int_t i = 0, j = threadIdx.x; j < m_end - m_pos; j += blockDim.x, i++) lreg[i] = lbuf[l][j];
+#pragma unroll
+      for(int_t j = 0; j < 4; ++j){
+#pragma unroll
+       for(int_t i = 0; i < 4; ++i){
+        dreg[j][i] += lreg[i] * rreg[j];
+       }
+      }
+     }
+    }else{
+     for(int_t l = 0; l < (k_end - k_pos); ++l){
+      for(int_t i = 0, j = threadIdx.y; j < n_end - n_pos; j += blockDim.y, i++) rreg[i] = rbuf[j][l];
+      for(int_t i = 0, j = threadIdx.x; j < m_end - m_pos; j += blockDim.x, i++) lreg[i] = lbuf[l][j];
+#pragma unroll
+      for(int_t j = 0; j < 4; ++j){
+#pragma unroll
+       for(int_t i = 0; i < 4; ++i){
+        dreg[j][i] += lreg[i] * rreg[j];
+       }
+      }
+     }
+    }
+    __syncthreads();
+
+   } //k_pos
+
+   //Store element of the C matrix in global memory:
+   for(int_t j = 0, n_loc = n_pos + threadIdx.y; n_loc < n_end; n_loc += blockDim.y, j++){
+    for(int_t i = 0, m_loc = m_pos + threadIdx.x; m_loc < m_end; m_loc += blockDim.x, i++){
+     dest[n_loc*m + m_loc] += dreg[j][i];
+    }
+   }
+
+  } //m_pos
+
+ } //n_pos
+ return;
+}
+
+
+template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K, int FRAG_EXT_N, int FRAG_EXT_M>
+__global__ void gpu_gemm_sh_reg_old_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
 {
  using int_t = int; //either int or size_t
  __shared__ T lbuf[TILE_EXT_K][TILE_EXT_M], rbuf[TILE_EXT_N][TILE_EXT_K];
@@ -529,22 +611,22 @@ void matrix_multiplication_gpu_(bool left_transp, bool right_transp,
    int m = nrows0, n = ncols0, k = ncols1;
    dim3 threads(16,16);
    dim3 blocks((nrows0-1)/16+1,(ncols0-1)/16+1);
-   gpu_gemm_sh_reg_nn<T,16,16,64><<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+   gpu_gemm_sh_reg_nn<T,64,64,16><<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }else if(left_transp && !right_transp){
    int m = nrows0, n = ncols0, k = nrows1;
    dim3 threads(16,16);
    dim3 blocks((nrows0-1)/16+1,(ncols0-1)/16+1);
-   //gpu_gemm_sh_reg_tn<T,16,16,64><<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+   //gpu_gemm_sh_reg_tn<T,64,64,16><<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }else if(!left_transp && right_transp){
    int m = nrows0, n = ncols0, k = ncols1;
    dim3 threads(16,16);
    dim3 blocks((nrows0-1)/16+1,(ncols0-1)/16+1);
-   //gpu_gemm_sh_reg_nt<T,16,16,64><<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+   //gpu_gemm_sh_reg_nt<T,64,64,16><<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }else if(left_transp && right_transp){
    int m = nrows0, n = ncols0, k = nrows1;
    dim3 threads(16,16);
    dim3 blocks((nrows0-1)/16+1,(ncols0-1)/16+1);
-   //gpu_gemm_sh_reg_tt<T,16,16,64><<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
+   //gpu_gemm_sh_reg_tt<T,64,64,16><<<blocks,threads>>>(m,n,k,matrix0_body,matrix1_body,matrix2_body);
   }
  }else{ //cuBLAS GEMM
   int dev; cudaError_t cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
