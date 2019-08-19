@@ -52,8 +52,8 @@ float matrix_norm2_gpu(size_t num_elems, const float * matrix_body);
 double matrix_norm2_gpu(size_t num_elems, const double * matrix_body);
 
 /** Matrix addition **/
-void matrix_addition_gpu(size_t num_elems, float * matrix0_body, const float * matrix1_body);
-void matrix_addition_gpu(size_t num_elems, double * matrix0_body, const double * matrix1_body);
+void matrix_addition_gpu(size_t num_elems, float * matrix0_body, const float * matrix1_body, float alpha);
+void matrix_addition_gpu(size_t num_elems, double * matrix0_body, const double * matrix1_bod, double alpha);
 
 /** Matrix multiplication **/
 void matrix_multiplication_gpu(bool left_transp, bool right_transp,

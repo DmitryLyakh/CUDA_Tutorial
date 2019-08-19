@@ -26,23 +26,28 @@ void use_bla()
 {
  std::cout << "Let's try to use BLA library ..." << std::endl;
  //Create matrix A:
- bla::Matrix<float> A(1000,2000);
+ bla::Matrix<float> A(2000,2000);
  //Allocate matrix A body on Host:
  A.allocateBody(-1,bla::MemKind::Pinned);
  //Set matrix A body to some non-trivial value on Host:
  A.setBodyHost();
 
  //Create matrix B:
- bla::Matrix<float> B(2000,3000);
+ bla::Matrix<float> B(2000,2000);
  //Allocate matrix B body on Host:
  B.allocateBody(-1,bla::MemKind::Pinned);
  //Set matrix B body to some non-trivial value on Host:
  B.setBodyHost();
 
  //Create matrix C:
- bla::Matrix<float> C(1000,3000);
+ bla::Matrix<float> C(2000,2000);
  //Allocate matrix C body on GPU#0:
  C.allocateBody(0,bla::MemKind::Regular);
+
+ //Create matrix D:
+ bla::Matrix<float> D(2000,2000);
+ //Allocate matrix D body on GPU#0:
+ D.allocateBody(0,bla::MemKind::Regular);
 
  //Copy matrix A to GPU#0 from Host:
  A.syncBody(0,-1);
@@ -60,7 +65,6 @@ void use_bla()
  std::cout << "Matrix multiplication C+=A*B requires " << flops/1e9 << " Gflop" << std::endl;
 
  //Perform reference matrix multiplication on GPU#0 with cuBLAS:
- double normC;
  for(int repeat = 0; repeat < 2; ++repeat){
   C.zeroBody(0); //set matrix C body to zero on GPU#0
   bla::reset_gemm_algorithm(7);
@@ -70,8 +74,10 @@ void use_bla()
   double tmf = bla::time_sys_sec();
   std::cout << "Done: Time = " << tmf-tms << " s: Gflop/s = " << flops/(tmf-tms)/1e9 << std::endl;
   //Compute C norm on GPU#0:
-  normC = C.computeNorm(0); //correct C matrix norm
+  auto normC = C.computeNorm(0); //correct C matrix norm
   std::cout << "Matrix C norm = " << normC << std::endl;
+  D.zeroBody(0); //set matrix D body to zero on GPU#0
+  D.add(C,-1.0f,0); //make matrix D = -C for later correctness checks
  }
 
  //Perform matrix multiplication on GPU#0 with BLA GEMM brute-force:
@@ -83,13 +89,12 @@ void use_bla()
   C.multiplyAdd(false,false,A,B,0);
   double tmf = bla::time_sys_sec();
   std::cout << "Done: Time = " << tmf-tms << " s: Gflop/s = " << flops/(tmf-tms)/1e9 << std::endl;
-  //Compute C norm on GPU#0:
-  auto norm_diff = normC;
-  normC = C.computeNorm(0);
-  norm_diff -= normC;
-  std::cout << "Matrix C norm = " << normC << ": Error = " << std::abs(norm_diff) << std::endl;
-  if(std::abs(norm_diff) > 5e-5){
-   std::cout << "#FATAL: Matrix C norm is incorrect, fix your GPU kernel implementation!" << std::endl;
+  //Check correctness on GPU#0:
+  C.add(D,1.0f,0);
+  auto norm_diff = C.computeNorm(0);
+  std::cout << "Norm of the matrix C deviation from correct = " << norm_diff << std::endl;
+  if(std::abs(norm_diff) > 1e-7){
+   std::cout << "#FATAL: Matrix C is incorrect, fix your GPU kernel implementation!" << std::endl;
    std::exit(1);
   }
  }
@@ -103,13 +108,12 @@ void use_bla()
   C.multiplyAdd(false,false,A,B,0);
   double tmf = bla::time_sys_sec();
   std::cout << "Done: Time = " << tmf-tms << " s: Gflop/s = " << flops/(tmf-tms)/1e9 << std::endl;
-  //Compute C norm on GPU#0:
-  auto norm_diff = normC;
-  normC = C.computeNorm(0);
-  norm_diff -= normC;
-  std::cout << "Matrix C norm = " << normC << ": Error = " << std::abs(norm_diff) << std::endl;
-  if(std::abs(norm_diff) > 5e-5){
-   std::cout << "#FATAL: Matrix C norm is incorrect, fix your GPU kernel implementation!" << std::endl;
+  //Check correctness on GPU#0:
+  C.add(D,1.0f,0);
+  auto norm_diff = C.computeNorm(0);
+  std::cout << "Norm of the matrix C deviation from correct = " << norm_diff << std::endl;
+  if(std::abs(norm_diff) > 1e-7){
+   std::cout << "#FATAL: Matrix C is incorrect, fix your GPU kernel implementation!" << std::endl;
    std::exit(1);
   }
  }
@@ -123,13 +127,12 @@ void use_bla()
   C.multiplyAdd(false,false,A,B,0);
   double tmf = bla::time_sys_sec();
   std::cout << "Done: Time = " << tmf-tms << " s: Gflop/s = " << flops/(tmf-tms)/1e9 << std::endl;
-  //Compute C norm on GPU#0:
-  auto norm_diff = normC;
-  normC = C.computeNorm(0);
-  norm_diff -= normC;
-  std::cout << "Matrix C norm = " << normC << ": Error = " << std::abs(norm_diff) << std::endl;
-  if(std::abs(norm_diff) > 5e-5){
-   std::cout << "#FATAL: Matrix C norm is incorrect, fix your GPU kernel implementation!" << std::endl;
+  //Check correctness on GPU#0:
+  C.add(D,1.0f,0);
+  auto norm_diff = C.computeNorm(0);
+  std::cout << "Norm of the matrix C deviation from correct = " << norm_diff << std::endl;
+  if(std::abs(norm_diff) > 1e-7){
+   std::cout << "#FATAL: Matrix C is incorrect, fix your GPU kernel implementation!" << std::endl;
    std::exit(1);
   }
  }

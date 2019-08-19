@@ -86,7 +86,7 @@ __device__ static unsigned int norm_wr_lock = 0; //reduction lock (per GPU)
 
 
 template <typename T>
-__global__ void gpu_array_add(size_t arr_size, T * __restrict__ arr0, const T * __restrict__ arr1);
+__global__ void gpu_array_add(size_t arr_size, T * __restrict__ arr0, const T * __restrict__ arr1, T alpha);
 
 
 template <typename T>
@@ -129,12 +129,35 @@ __global__ void gpu_gemm_sh_reg_tt(int m, int n, int k, T * __restrict__ dest, c
 //__global__ void gpu_gemm_sh_reg_old_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
 
 
+cublasStatus_t cublasGemm(cublasHandle_t handle,
+                          cublasOperation_t transa, cublasOperation_t transb,
+                          int m, int n, int k, const float * alpha,
+                          const float * A, int lda, const float * B, int ldb,
+                          const float * beta, float * C, int ldc)
+{
+ return cublasSgemm(handle,transa,transb,m,n,k,alpha,A,lda,B,ldb,beta,C,ldc);
+}
+
+cublasStatus_t cublasGemm(cublasHandle_t handle,
+                          cublasOperation_t transa, cublasOperation_t transb,
+                          int m, int n, int k, const double * alpha,
+                          const double * A, int lda, const double * B, int ldb,
+                          const double * beta, double * C, int ldc)
+{
+ return cublasDgemm(handle,transa,transb,m,n,k,alpha,A,lda,B,ldb,beta,C,ldc);
+}
+
+
 //Dispatch wrappers:
 template <typename T>
-T matrix_norm2_gpu_(size_t num_elems, const T * matrix_body);
+T matrix_norm2_gpu_(size_t num_elems,
+                    const T * matrix_body);
 
 template <typename T>
-void matrix_addition_gpu_(size_t num_elems, T * matrix0_body, const T * matrix1_body);
+void matrix_addition_gpu_(size_t num_elems,
+                          T * matrix0_body,
+                          const T * matrix1_body,
+                          T alpha);
 
 template <typename T>
 void matrix_multiplication_gpu_(bool left_transp, bool right_transp,
@@ -192,10 +215,11 @@ __global__ void gpu_array_norm2(size_t arr_size,            //in: array size
 template <typename T>
 __global__ void gpu_array_add(size_t arr_size,             //in: array size
                               T * __restrict__ arr0,       //inout: pointer to arr0[arr_size]
-                              const T * __restrict__ arr1) //in: pointer to arr1[arr_size]
+                              const T * __restrict__ arr1, //in: pointer to arr1[arr_size]
+                              T alpha)                     //in: scaling factor
 {
  size_t n = gridDim.x * blockDim.x;
- for(size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < arr_size; i += n) arr0[i] += arr1[i];
+ for(size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < arr_size; i += n) arr0[i] += arr1[i] * alpha;
  return;
 }
 
@@ -655,10 +679,10 @@ T matrix_norm2_gpu_(size_t num_elems, const T * matrix_body)
 
 
 template <typename T>
-void matrix_addition_gpu_(size_t num_elems, T * matrix0_body, const T * matrix1_body)
+void matrix_addition_gpu_(size_t num_elems, T * matrix0_body, const T * matrix1_body, T alpha)
 {
- unsigned int num_blocks = 1024; unsigned int num_threads = 256;
- gpu_array_add<<<num_blocks,num_threads>>>(num_elems,matrix0_body,matrix1_body);
+ unsigned int num_blocks = 4096; unsigned int num_threads = 256;
+ gpu_array_add<<<num_blocks,num_threads>>>(num_elems,matrix0_body,matrix1_body,alpha);
  cudaError_t cuerr = cudaDeviceSynchronize();
  cuerr = cudaGetLastError(); assert(cuerr == cudaSuccess);
  return;
@@ -739,20 +763,22 @@ void matrix_multiplication_gpu_(bool left_transp, bool right_transp,
   }
  }else{ //cuBLAS GEMM
   int dev; cudaError_t cuerr = cudaGetDevice(&dev); assert(cuerr == cudaSuccess);
-  cublasOperation_t transa = CUBLAS_OP_N; if(left_transp) transa = CUBLAS_OP_T;
-  cublasOperation_t transb = CUBLAS_OP_N; if(right_transp) transb = CUBLAS_OP_T;
-  int m = nrows0, n = ncols0, k = ncols1;
-  if(left_transp) k = nrows1;
-  void *alpha, *beta;
+  int m = nrows1; cublasOperation_t transa = CUBLAS_OP_N;
+  if(left_transp){m = ncols1; transa = CUBLAS_OP_T;}
+  int n = ncols2; cublasOperation_t transb = CUBLAS_OP_N;
+  if(right_transp){n = nrows2; transb = CUBLAS_OP_T;}
+  int k = ncols1; if(left_transp) k = nrows1;
+  T *alpha, *beta;
   if(CudaFPData<T>::kind == CUDA_R_32F){
-   cuerr = cudaGetSymbolAddress(&alpha,unity_fp32); assert(cuerr == cudaSuccess);
-   cuerr = cudaGetSymbolAddress(&beta,unity_fp32); assert(cuerr == cudaSuccess);
+   cuerr = cudaGetSymbolAddress((void**)&alpha,unity_fp32); assert(cuerr == cudaSuccess);
+   cuerr = cudaGetSymbolAddress((void**)&beta,unity_fp32); assert(cuerr == cudaSuccess);
   }else if(CudaFPData<T>::kind == CUDA_R_64F){
-   cuerr = cudaGetSymbolAddress(&alpha,unity_fp64); assert(cuerr == cudaSuccess);
-   cuerr = cudaGetSymbolAddress(&beta,unity_fp64); assert(cuerr == cudaSuccess);
+   cuerr = cudaGetSymbolAddress((void**)&alpha,unity_fp64); assert(cuerr == cudaSuccess);
+   cuerr = cudaGetSymbolAddress((void**)&beta,unity_fp64); assert(cuerr == cudaSuccess);
   }else{
    assert(false);
   }
+#ifdef USE_CUBLAS_GEMM_EX
   cublasStatus_t custat = cublasGemmEx(cublasHandle[dev],
                                        transa,transb,
                                        m,n,k,
@@ -762,6 +788,16 @@ void matrix_multiplication_gpu_(bool left_transp, bool right_transp,
                                        beta,
                                        matrix0_body,CudaFPData<T>::kind,nrows0,
                                        CudaFPData<T>::kind, CUBLAS_GEMM_DEFAULT);
+#else
+  cublasStatus_t custat = cublasGemm(cublasHandle[dev],
+                                     transa,transb,
+                                     m,n,k,
+                                     alpha,
+                                     matrix1_body,nrows1,
+                                     matrix2_body,nrows2,
+                                     beta,
+                                     matrix0_body,nrows0);
+#endif
   if(custat != CUBLAS_STATUS_SUCCESS) std::cout << "#ERROR(cublasGemmEx): Eror " << custat << std::endl;
   assert(custat == CUBLAS_STATUS_SUCCESS);
  }
@@ -788,14 +824,14 @@ double matrix_norm2_gpu(size_t num_elems, const double * matrix_body)
 }
 
 
-void matrix_addition_gpu(size_t num_elems, float * matrix0_body, const float * matrix1_body)
+void matrix_addition_gpu(size_t num_elems, float * matrix0_body, const float * matrix1_body, float alpha)
 {
- return matrix_addition_gpu_(num_elems,matrix0_body,matrix1_body);
+ return matrix_addition_gpu_(num_elems,matrix0_body,matrix1_body,alpha);
 }
 
-void matrix_addition_gpu(size_t num_elems, double * matrix0_body, const double * matrix1_body)
+void matrix_addition_gpu(size_t num_elems, double * matrix0_body, const double * matrix1_body, double alpha)
 {
- return matrix_addition_gpu_(num_elems,matrix0_body,matrix1_body);
+ return matrix_addition_gpu_(num_elems,matrix0_body,matrix1_body,alpha);
 }
 
 

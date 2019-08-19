@@ -25,9 +25,11 @@
 
 #include <cuda_runtime.h>
 
-#include <iostream>
+#include <cstdlib>
 #include <cstring>
+#include <cmath>
 #include <cassert>
+#include <iostream>
 #include <list>
 #include <type_traits>
 
@@ -73,7 +75,7 @@ public:
  /** Computes the norm of the matrix on a given device **/
  double computeNorm(int device = -1);
  /** Performs matrix addition on a given device **/
- void add(Matrix & Amat, int device = -1);
+ void add(Matrix & Amat, T alpha = static_cast<T>(1.0), int device = -1);
  /** Performs matrix multiplication on a given device **/
  void multiplyAdd(bool left_transp, bool right_transp, Matrix & Amat, Matrix & Bmat, int device = -1);
 
@@ -229,7 +231,8 @@ void Matrix<T>::setBodyHost()
   for(std::size_t j = 0; j < ncols_; ++j){
    std::size_t offset = j*nrows_;
    for(std::size_t i = 0; i < nrows_; ++i){
-    mat[offset+i] = static_cast<T>(1)/(static_cast<T>(i) + static_cast<T>(j) + static_cast<T>(1)); //some value
+    //mat[offset+i] = static_cast<T>(1)/(static_cast<T>(i+7) + static_cast<T>(j+13)); //some value
+    mat[offset+i] = static_cast<T>(1)/std::log(static_cast<T>(std::rand()+13)); //some value
    }
   }
   this->markBodyStatus(-1,true); //mark matrix body on Host as up-to-date
@@ -305,7 +308,7 @@ double Matrix<T>::computeNorm(int device)
 
 
 template <typename T>
-void Matrix<T>::add(Matrix & Amat, int device)
+void Matrix<T>::add(Matrix & Amat, T alpha, int device)
 {
  std::size_t vol = this->getVolume();
  assert(Amat.getVolume() == vol);
@@ -316,7 +319,7 @@ void Matrix<T>::add(Matrix & Amat, int device)
   if(device != dev){
    cuerr = cudaSetDevice(device); assert(cuerr == cudaSuccess);
   }
-  matrix_addition_gpu(vol,matrix0_body,matrix1_body);
+  matrix_addition_gpu(vol,matrix0_body,matrix1_body,alpha);
   if(device != dev){
    cuerr = cudaSetDevice(dev); assert(cuerr == cudaSuccess);
   }
