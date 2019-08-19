@@ -15,7 +15,7 @@ CUDA_LIB = -L/usr/local/cuda/lib64 -lcublas -lcudart
 CUDA_FLAGS_DEV = --compile -ccbin $(CUDA_HOST) -std=c++11 -arch=$(CUDA_ARCH) -O3 -m64 -w --resource-usage --ptxas-options=-v -Xcompiler -fPIC -D_FORCE_INLINES -g -G
 CUDA_FLAGS_OPT = --compile -ccbin $(CUDA_HOST) -std=c++11 -arch=$(CUDA_ARCH) -O3 -m64 -w --resource-usage --ptxas-options=-v -Xcompiler -fPIC -D_FORCE_INLINES
 CUDA_FLAGS_ADV = --compile -ccbin $(CUDA_HOST) -std=c++11 -arch=$(CUDA_ARCH) -O3 -m64 -w --resource-usage --ptxas-options=-v -lineinfo -Xcompiler -fPIC -D_FORCE_INLINES
-CUDA_FLAGS = $(CUDA_FLAGS_OPT)
+CUDA_FLAGS = $(CUDA_FLAGS_ADV)
 
 LINK_FLAGS = -fPIC
 
