@@ -54,10 +54,12 @@ void use_bla()
  std::cout << "Matrix B norm = " << normB << std::endl;
 
  //Determine total number of floating point operations:
- double flops = 2.0*std::sqrt(static_cast<double>(A.getVolume()) * static_cast<double>(B.getVolume()) * static_cast<double>(C.getVolume()));
+ double flops = 2.0 * std::sqrt(static_cast<double>(A.getVolume()) *
+                                static_cast<double>(B.getVolume()) *
+                                static_cast<double>(C.getVolume()));
  std::cout << "Matrix multiplication C+=A*B requires " << flops/1e9 << " Gflop" << std::endl;
 
- //Perform matrix multiplication on GPU#0 with cuBLAS:
+ //Perform reference matrix multiplication on GPU#0 with cuBLAS:
  double normC;
  for(int repeat = 0; repeat < 2; ++repeat){
   C.zeroBody(0); //set matrix C body to zero on GPU#0
@@ -68,7 +70,7 @@ void use_bla()
   double tmf = bla::time_sys_sec();
   std::cout << "Done: Time = " << tmf-tms << " s: Gflop/s = " << flops/(tmf-tms)/1e9 << std::endl;
   //Compute C norm on GPU#0:
-  normC = C.computeNorm(0);
+  normC = C.computeNorm(0); //correct C matrix norm
   std::cout << "Matrix C norm = " << normC << std::endl;
  }
 
@@ -86,6 +88,10 @@ void use_bla()
   normC = C.computeNorm(0);
   norm_diff -= normC;
   std::cout << "Matrix C norm = " << normC << ": Error = " << std::abs(norm_diff) << std::endl;
+  if(std::abs(norm_diff) > 5e-5){
+   std::cout << "#FATAL: Matrix C norm is incorrect, fix your GPU kernel implementation!" << std::endl;
+   std::exit(1);
+  }
  }
 
  //Perform matrix multiplication on GPU#0 with BLA GEMM with shared memory:
@@ -102,6 +108,10 @@ void use_bla()
   normC = C.computeNorm(0);
   norm_diff -= normC;
   std::cout << "Matrix C norm = " << normC << ": Error = " << std::abs(norm_diff) << std::endl;
+  if(std::abs(norm_diff) > 5e-5){
+   std::cout << "#FATAL: Matrix C norm is incorrect, fix your GPU kernel implementation!" << std::endl;
+   std::exit(1);
+  }
  }
 
  //Perform matrix multiplication on GPU#0 with BLA GEMM with shared memory and registers:
@@ -118,9 +128,13 @@ void use_bla()
   normC = C.computeNorm(0);
   norm_diff -= normC;
   std::cout << "Matrix C norm = " << normC << ": Error = " << std::abs(norm_diff) << std::endl;
+  if(std::abs(norm_diff) > 5e-5){
+   std::cout << "#FATAL: Matrix C norm is incorrect, fix your GPU kernel implementation!" << std::endl;
+   std::exit(1);
+  }
  }
 
- std::cout << "Seems like it works?" << std::endl;
+ std::cout << "Seems like it works!" << std::endl;
  return;
 }
 

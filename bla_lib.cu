@@ -79,9 +79,11 @@ bool test_norm();
 //CUDA kernel prototypes:
 __global__ void gpu_test_presence(size_t str_len, char * __restrict__ dst, const char * __restrict__ src);
 
+
 template <typename T>
 __global__ void gpu_array_norm2(size_t arr_size, const T * __restrict__ arr, volatile T * norm);
 __device__ static unsigned int norm_wr_lock = 0; //reduction lock (per GPU)
+
 
 template <typename T>
 __global__ void gpu_array_add(size_t arr_size, T * __restrict__ arr0, const T * __restrict__ arr1);
@@ -96,14 +98,14 @@ __global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const
 template <typename T, int TILE_EXT_N = 64, int TILE_EXT_M = 64, int TILE_EXT_K = 16>
 __global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
 
-template <typename T, int TILE_EXT_N = 16, int TILE_EXT_M = 16, int TILE_EXT_K = 64, int FRAG_EXT_N = 4, int FRAG_EXT_M = 8>
-__global__ void gpu_gemm_sh_reg_old_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
-
 template <typename T>
 __global__ void gpu_gemm_tn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
 
 template <typename T, int TILE_EXT_N = 16, int TILE_EXT_M = 16, int TILE_EXT_K = 64>
 __global__ void gpu_gemm_sh_tn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
+
+template <typename T, int TILE_EXT_N = 64, int TILE_EXT_M = 64, int TILE_EXT_K = 16>
+__global__ void gpu_gemm_sh_reg_tn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
 
 template <typename T>
 __global__ void gpu_gemm_nt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
@@ -111,11 +113,20 @@ __global__ void gpu_gemm_nt(int m, int n, int k, T * __restrict__ dest, const T 
 template <typename T, int TILE_EXT_N = 16, int TILE_EXT_M = 16, int TILE_EXT_K = 64>
 __global__ void gpu_gemm_sh_nt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
 
+template <typename T, int TILE_EXT_N = 64, int TILE_EXT_M = 64, int TILE_EXT_K = 16>
+__global__ void gpu_gemm_sh_reg_nt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
+
 template <typename T>
 __global__ void gpu_gemm_tt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
 
 template <typename T, int TILE_EXT_N = 16, int TILE_EXT_M = 16, int TILE_EXT_K = 64>
 __global__ void gpu_gemm_sh_tt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
+
+template <typename T, int TILE_EXT_N = 64, int TILE_EXT_M = 64, int TILE_EXT_K = 16>
+__global__ void gpu_gemm_sh_reg_tt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
+
+//template <typename T, int TILE_EXT_N = 16, int TILE_EXT_M = 16, int TILE_EXT_K = 64, int FRAG_EXT_N = 4, int FRAG_EXT_M = 8>
+//__global__ void gpu_gemm_sh_reg_old_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right);
 
 
 //Dispatch wrappers:
@@ -145,7 +156,9 @@ __global__ void gpu_test_presence(size_t str_len, char * __restrict__ dst, const
 
 
 template <typename T>
-__global__ void gpu_array_norm2(size_t arr_size, const T * __restrict__ arr, volatile T * norm)
+__global__ void gpu_array_norm2(size_t arr_size,            //in: array size
+                                const T * __restrict__ arr, //in: pointer to arr[arr_size]
+                                volatile T * norm)          //inout: sum of the squared elements of the array
 {
  extern __shared__ double thread_norm[]; //blockDim.x
 
@@ -177,7 +190,9 @@ __global__ void gpu_array_norm2(size_t arr_size, const T * __restrict__ arr, vol
 
 
 template <typename T>
-__global__ void gpu_array_add(size_t arr_size, T * __restrict__ arr0, const T * __restrict__ arr1)
+__global__ void gpu_array_add(size_t arr_size,             //in: array size
+                              T * __restrict__ arr0,       //inout: pointer to arr0[arr_size]
+                              const T * __restrict__ arr1) //in: pointer to arr1[arr_size]
 {
  size_t n = gridDim.x * blockDim.x;
  for(size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < arr_size; i += n) arr0[i] += arr1[i];
@@ -186,7 +201,10 @@ __global__ void gpu_array_add(size_t arr_size, T * __restrict__ arr0, const T * 
 
 
 template <typename T>
-__global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+__global__ void gpu_gemm_nn(int m, int n, int k,          //in: matrix dimensions: C(m,n)+=A(m,k)*B(k,n)
+                            T * __restrict__ dest,        //inout: pointer to C matrix data
+                            const T * __restrict__ left,  //in: pointer to A matrix data
+                            const T * __restrict__ right) //in: pointer to B matrix data
 {
  size_t ty = blockIdx.y*blockDim.y + threadIdx.y; //global thread index Y
  size_t tx = blockIdx.x*blockDim.x + threadIdx.x; //global thread index X
@@ -213,7 +231,10 @@ __global__ void gpu_gemm_nn(int m, int n, int k, T * __restrict__ dest, const T 
 
 
 template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K>
-__global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+__global__ void gpu_gemm_sh_nn(int m, int n, int k,          //in: matrix dimensions: C(m,n)+=A(m,k)*B(k,n)
+                               T * __restrict__ dest,        //inout: pointer to C matrix data
+                               const T * __restrict__ left,  //in: pointer to A matrix data
+                               const T * __restrict__ right) //in: pointer to B matrix data
 {
  using int_t = int; //either int or size_t
  __shared__ T lbuf[TILE_EXT_K][TILE_EXT_M], rbuf[TILE_EXT_N][TILE_EXT_K];
@@ -271,7 +292,10 @@ __global__ void gpu_gemm_sh_nn(int m, int n, int k, T * __restrict__ dest, const
 
 
 template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K>
-__global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+__global__ void gpu_gemm_sh_reg_nn(int m, int n, int k,          //in: matrix dimensions: C(m,n)+=A(m,k)*B(k,n)
+                                   T * __restrict__ dest,        //inout: pointer to C matrix data
+                                   const T * __restrict__ left,  //in: pointer to A matrix data
+                                   const T * __restrict__ right) //in: pointer to B matrix data
 {
  using int_t = int; //either int or size_t
  __shared__ T lbuf[TILE_EXT_K][TILE_EXT_M], rbuf[TILE_EXT_N][TILE_EXT_K];
@@ -408,6 +432,79 @@ __global__ void gpu_gemm_sh_reg_nn(int m, int n, int k, T * __restrict__ dest, c
 }
 
 
+template <typename T>
+__global__ void gpu_gemm_tn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+{
+ //`Finish
+ return;
+}
+
+
+template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K>
+__global__ void gpu_gemm_sh_tn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+{
+ //`Finish
+ return;
+}
+
+
+template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K>
+__global__ void gpu_gemm_sh_reg_tn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+{
+ //`Finish
+ return;
+}
+
+
+template <typename T>
+__global__ void gpu_gemm_nt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+{
+ //`Finish
+ return;
+}
+
+
+template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K>
+__global__ void gpu_gemm_sh_nt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+{
+ //`Finish
+ return;
+}
+
+
+template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K>
+__global__ void gpu_gemm_sh_reg_nt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+{
+ //`Finish
+ return;
+}
+
+
+template <typename T>
+__global__ void gpu_gemm_tt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+{
+ //`Finish
+ return;
+}
+
+
+template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K>
+__global__ void gpu_gemm_sh_tt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+{
+ //`Finish
+ return;
+}
+
+
+template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K>
+__global__ void gpu_gemm_sh_reg_tt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
+{
+ //`Finish
+ return;
+}
+
+
+/*
 template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K, int FRAG_EXT_N, int FRAG_EXT_M>
 __global__ void gpu_gemm_sh_reg_old_nn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
 {
@@ -537,54 +634,7 @@ __global__ void gpu_gemm_sh_reg_old_nn(int m, int n, int k, T * __restrict__ des
  } //n_pos
  return;
 }
-
-
-template <typename T>
-__global__ void gpu_gemm_tn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
-{
- //`Finish
- return;
-}
-
-
-template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K>
-__global__ void gpu_gemm_sh_tn(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
-{
- //`Finish
- return;
-}
-
-
-template <typename T>
-__global__ void gpu_gemm_nt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
-{
- //`Finish
- return;
-}
-
-
-template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K>
-__global__ void gpu_gemm_sh_nt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
-{
- //`Finish
- return;
-}
-
-
-template <typename T>
-__global__ void gpu_gemm_tt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
-{
- //`Finish
- return;
-}
-
-
-template <typename T, int TILE_EXT_N, int TILE_EXT_M, int TILE_EXT_K>
-__global__ void gpu_gemm_sh_tt(int m, int n, int k, T * __restrict__ dest, const T * __restrict__ left, const T * __restrict__ right)
-{
- //`Finish
- return;
-}
+*/
 
 
 template <typename T>
