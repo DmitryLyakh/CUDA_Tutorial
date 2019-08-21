@@ -24,7 +24,13 @@
 
 void use_bla()
 {
+ //Pick which GEMM tests you enable:
+ const bool TEST_BLA_GEMM_BRUTE = true; //enables/disables testing of brute-force GEMM
+ const bool TEST_BLA_GEMM_SHARED = true; //enables/disables testing of shared memory GEMM
+ const bool TEST_BLA_GEMM_REGISTER = true; //enables/disables testing of register-based GEMM
+
  std::cout << "Let's try to use BLA library ..." << std::endl;
+
  //Create matrix A:
  bla::Matrix<float> A(2000,2000);
  //Allocate matrix A body on Host:
@@ -50,11 +56,14 @@ void use_bla()
  D.allocateBody(0,bla::MemKind::Regular);
 
  //Copy matrix A to GPU#0 from Host:
- A.syncBody(0,-1);
+ A.syncBody(0,-1); //Host (-1) --> GPU#0 (0)
+ //Compute matrix A norm on GPU#0:
  auto normA = A.computeNorm(0);
  std::cout << "Matrix A norm = " << normA << std::endl;
+
  //Copy matrix B to GPU#0 from Host:
- B.syncBody(0,-1);
+ B.syncBody(0,-1); //Host (-1) --> GPU#0 (0)
+ //Compute matrix B norm on GPU#0:
  auto normB = B.computeNorm(0);
  std::cout << "Matrix B norm = " << normB << std::endl;
 
@@ -81,59 +90,65 @@ void use_bla()
  }
 
  //Perform matrix multiplication on GPU#0 with BLA GEMM brute-force:
- for(int repeat = 0; repeat < 2; ++repeat){
-  C.zeroBody(0); //set matrix C body to zero on GPU#0
-  bla::reset_gemm_algorithm(0);
-  std::cout << "Performing matrix multiplication C+=A*B with BLA GEMM brute-force ... ";
-  double tms = bla::time_sys_sec();
-  C.multiplyAdd(false,false,A,B,0);
-  double tmf = bla::time_sys_sec();
-  std::cout << "Done: Time = " << tmf-tms << " s: Gflop/s = " << flops/(tmf-tms)/1e9 << std::endl;
-  //Check correctness on GPU#0:
-  C.add(D,1.0f,0);
-  auto norm_diff = C.computeNorm(0);
-  std::cout << "Norm of the matrix C deviation from correct = " << norm_diff << std::endl;
-  if(std::abs(norm_diff) > 1e-7){
-   std::cout << "#FATAL: Matrix C is incorrect, fix your GPU kernel implementation!" << std::endl;
-   std::exit(1);
+ if(TEST_BLA_GEMM_BRUTE){
+  for(int repeat = 0; repeat < 2; ++repeat){
+   C.zeroBody(0); //set matrix C body to zero on GPU#0
+   bla::reset_gemm_algorithm(0);
+   std::cout << "Performing matrix multiplication C+=A*B with BLA GEMM brute-force ... ";
+   double tms = bla::time_sys_sec();
+   C.multiplyAdd(false,false,A,B,0);
+   double tmf = bla::time_sys_sec();
+   std::cout << "Done: Time = " << tmf-tms << " s: Gflop/s = " << flops/(tmf-tms)/1e9 << std::endl;
+   //Check correctness on GPU#0:
+   C.add(D,1.0f,0);
+   auto norm_diff = C.computeNorm(0);
+   std::cout << "Norm of the matrix C deviation from correct = " << norm_diff << std::endl;
+   if(std::abs(norm_diff) > 1e-7){
+    std::cout << "#FATAL: Matrix C is incorrect, fix your GPU kernel implementation!" << std::endl;
+    std::exit(1);
+   }
   }
  }
 
  //Perform matrix multiplication on GPU#0 with BLA GEMM with shared memory:
- for(int repeat = 0; repeat < 2; ++repeat){
-  C.zeroBody(0); //set matrix C body to zero on GPU#0
-  bla::reset_gemm_algorithm(1);
-  std::cout << "Performing matrix multiplication C+=A*B with BLA GEMM with shared memory ... ";
-  double tms = bla::time_sys_sec();
-  C.multiplyAdd(false,false,A,B,0);
-  double tmf = bla::time_sys_sec();
-  std::cout << "Done: Time = " << tmf-tms << " s: Gflop/s = " << flops/(tmf-tms)/1e9 << std::endl;
-  //Check correctness on GPU#0:
-  C.add(D,1.0f,0);
-  auto norm_diff = C.computeNorm(0);
-  std::cout << "Norm of the matrix C deviation from correct = " << norm_diff << std::endl;
-  if(std::abs(norm_diff) > 1e-7){
-   std::cout << "#FATAL: Matrix C is incorrect, fix your GPU kernel implementation!" << std::endl;
-   std::exit(1);
+ if(TEST_BLA_GEMM_SHARED){
+  for(int repeat = 0; repeat < 2; ++repeat){
+   C.zeroBody(0); //set matrix C body to zero on GPU#0
+   bla::reset_gemm_algorithm(1);
+   std::cout << "Performing matrix multiplication C+=A*B with BLA GEMM with shared memory ... ";
+   double tms = bla::time_sys_sec();
+   C.multiplyAdd(false,false,A,B,0);
+   double tmf = bla::time_sys_sec();
+   std::cout << "Done: Time = " << tmf-tms << " s: Gflop/s = " << flops/(tmf-tms)/1e9 << std::endl;
+   //Check correctness on GPU#0:
+   C.add(D,1.0f,0);
+   auto norm_diff = C.computeNorm(0);
+   std::cout << "Norm of the matrix C deviation from correct = " << norm_diff << std::endl;
+   if(std::abs(norm_diff) > 1e-7){
+    std::cout << "#FATAL: Matrix C is incorrect, fix your GPU kernel implementation!" << std::endl;
+    std::exit(1);
+   }
   }
  }
 
  //Perform matrix multiplication on GPU#0 with BLA GEMM with shared memory and registers:
- for(int repeat = 0; repeat < 2; ++repeat){
-  C.zeroBody(0); //set matrix C body to zero on GPU#0
-  bla::reset_gemm_algorithm(2);
-  std::cout << "Performing matrix multiplication C+=A*B with BLA GEMM with shared memory and registers ... ";
-  double tms = bla::time_sys_sec();
-  C.multiplyAdd(false,false,A,B,0);
-  double tmf = bla::time_sys_sec();
-  std::cout << "Done: Time = " << tmf-tms << " s: Gflop/s = " << flops/(tmf-tms)/1e9 << std::endl;
+ if(TEST_BLA_GEMM_REGISTER){
+  for(int repeat = 0; repeat < 2; ++repeat){
+   C.zeroBody(0); //set matrix C body to zero on GPU#0
+   bla::reset_gemm_algorithm(2);
+   std::cout << "Performing matrix multiplication C+=A*B with BLA GEMM with shared memory and registers ... ";
+   double tms = bla::time_sys_sec();
+   C.multiplyAdd(false,false,A,B,0);
+   double tmf = bla::time_sys_sec();
+   std::cout << "Done: Time = " << tmf-tms << " s: Gflop/s = " << flops/(tmf-tms)/1e9 << std::endl;
   //Check correctness on GPU#0:
-  C.add(D,1.0f,0);
-  auto norm_diff = C.computeNorm(0);
-  std::cout << "Norm of the matrix C deviation from correct = " << norm_diff << std::endl;
-  if(std::abs(norm_diff) > 1e-7){
-   std::cout << "#FATAL: Matrix C is incorrect, fix your GPU kernel implementation!" << std::endl;
-   std::exit(1);
+   C.add(D,1.0f,0);
+    auto norm_diff = C.computeNorm(0);
+   std::cout << "Norm of the matrix C deviation from correct = " << norm_diff << std::endl;
+   if(std::abs(norm_diff) > 1e-7){
+    std::cout << "#FATAL: Matrix C is incorrect, fix your GPU kernel implementation!" << std::endl;
+    std::exit(1);
+   }
   }
  }
 
