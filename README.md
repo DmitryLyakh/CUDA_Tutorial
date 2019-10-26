@@ -13,6 +13,9 @@ https://github.com/DmitryLyakh/CUDA_Tutorial.git
 Presentation from the Petascale Computing Institute 2019:
 Presentation.pdf
 
+YouTube video of this tutorial:
+https://youtu.be/Zqfa80APkDk
+
 BUILD:
 1. Prerequisites: Linux, g++ 5+, CUDA 9+.
 2. Update CUDA_INC and CUDA_LIB paths in the Makefile (if needed).
